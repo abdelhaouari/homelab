@@ -1,0 +1,55 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  # Skip installer update for fast, reproducible builds
+  refresh-installer:
+    update: false
+
+  # Network — DHCP during installation only
+  # Cloud-Init will handle static IP assignment at deploy time (Terraform)
+  network:
+    network:
+      version: 2
+      ethernets:
+        ens18:
+          dhcp4: true
+
+  # Disk layout — use entire disk with LVM
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+
+  # Temporary build account (only used by Packer during image creation)
+  # Cloud-Init will reconfigure users at deploy time
+  identity:
+    hostname: ubuntu-golden
+    username: labadmin
+    # DUMMY PASSWORD HASH: "packerpassword"
+    # Risk Accepted: Used strictly for local ephemeral build automation.
+    # Hash generated with: openssl passwd -6 packerpassword
+    password: "$6$SfgDFzvVRxvZRhXd$SMxUOiTHAuPZzfRzcVmlvVH6XcSWMVNS.qZu1mGvZzvxIbwp.czNUOJ.ILI/EQlnDSN4rysbWWpnGItkk2Zlu1"
+
+  # Enable SSH server so Packer can connect after install
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  # Essential packages for Proxmox integration and post-deploy config
+  packages:
+    - qemu-guest-agent
+    - cloud-init
+    - sudo
+
+  # Post-install commands
+  late-commands:
+    # Enable qemu-guest-agent for Proxmox <-> VM communication
+    - "curtin in-target -- systemctl enable qemu-guest-agent"
+
+  # Security: disable root login
+  user-data:
+    disable_root: true

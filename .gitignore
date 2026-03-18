@@ -1,0 +1,42 @@
+# ========================
+# Secrets & Credentials
+# ========================
+credentials.pkrvars.hcl
+*.secret
+*.pem
+*.key
+.env
+.env.*
+
+# ========================
+# Packer
+# ========================
+packer_cache/
+*.iso
+crash.log
+
+# ========================
+# Terraform
+# ========================
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.auto.tfvars
+terraform.lock.hcl
+
+# ========================
+# Ansible
+# ========================
+*.retry
+
+# ========================
+# OS & Editor
+# ========================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
