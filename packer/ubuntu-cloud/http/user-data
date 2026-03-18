@@ -49,6 +49,9 @@ autoinstall:
   late-commands:
     # Enable qemu-guest-agent for Proxmox <-> VM communication
     - "curtin in-target -- systemctl enable qemu-guest-agent"
+    # Allow labadmin to run sudo without password (scaffolding for Packer)
+    - "curtin in-target -- bash -c 'echo \"labadmin ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/labadmin'"
+    - "curtin in-target -- chmod 440 /etc/sudoers.d/labadmin"
 
   # Security: disable root login
   user-data:

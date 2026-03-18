@@ -137,9 +137,11 @@ build {
       "sudo ln -s /etc/machine-id /var/lib/dbus/machine-id",
 
       # 7. Clear shell history (no build artifacts left in the template)
-      "history -c",
       "sudo rm -f /root/.bash_history",
-      "rm -f ~/.bash_history"
+      "rm -f ~/.bash_history",
+
+      # 8. Remove passwordless sudo scaffolding (Critical Security Step)
+      "sudo rm -f /etc/sudoers.d/labadmin"
     ]
   }
 }
