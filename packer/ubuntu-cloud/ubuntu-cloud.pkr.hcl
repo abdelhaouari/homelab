@@ -104,9 +104,42 @@ source "proxmox-iso" "ubuntu" {
 }
 
 # -----------------------------------------------
-# Build
+# Build and Provisioning
 # -----------------------------------------------
 build {
   name    = "ubuntu-golden"
   sources = ["source.proxmox-iso.ubuntu"]
+
+  # --- OS Hardening and Cleanup ---
+  provisioner "shell" {
+    inline = [
+      # 1. Lock the build user password (forces SSH key-only auth)
+      "sudo passwd -l labadmin",
+
+      # 2. Harden SSH: disable password authentication entirely
+      "sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
+      "sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
+
+      # 3. Remove the temporary build SSH authorized keys (if any)
+      "rm -f ~/.ssh/authorized_keys",
+
+      # 4. Clean apt cache (reduce image size)
+      "sudo apt-get autoremove -y",
+      "sudo apt-get clean",
+
+      # 5. Cloud-Init cleanup (critical for templates)
+      # Ensures cloned VMs regenerate unique SSH host keys, machine-id, and network config
+      "sudo cloud-init clean",
+
+      # 6. Clear machine-id (prevents DHCP IP conflicts across clones)
+      "sudo truncate -s 0 /etc/machine-id",
+      "sudo rm -f /var/lib/dbus/machine-id",
+      "sudo ln -s /etc/machine-id /var/lib/dbus/machine-id",
+
+      # 7. Clear shell history (no build artifacts left in the template)
+      "history -c",
+      "sudo rm -f /root/.bash_history",
+      "rm -f ~/.bash_history"
+    ]
+  }
 }
