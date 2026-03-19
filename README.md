@@ -87,8 +87,10 @@ packer build -var-file=credentials.pkrvars.hcl .
 ```
 
 The build takes ~8 minutes and produces a Proxmox template (VM ID 9000) with:
+
 - Ubuntu 24.04 LTS with LVM partitioning
 - QEMU Guest Agent enabled
 - Cloud-Init ready for Terraform deployment
-- SSH hardened (password auth disabled, build password locked)
-- Autoinstall delivered via mounted ISO (air-gapped - no HTTP dependency from WSL)
+- **Ephemeral Privilege Management:** Uses Cloud-Init to create temporary `NOPASSWD` sudo scaffolding for automation, which is strictly destroyed via a shell provisioner before template sealing.
+- **Aggressive OS Hardening:** SSH password auth disabled, build password locked, bash history purged, and machine-id cleared to prevent IP conflicts across clones.
+- Autoinstall delivered via mounted ISO (air-gapped - no HTTP dependency from WSL).
