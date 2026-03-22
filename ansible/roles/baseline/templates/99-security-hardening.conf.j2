@@ -1,0 +1,8 @@
+# ==============================================================================
+# Managed by Ansible - Do not edit manually
+# ==============================================================================
+# Kernel network security hardening parameters
+
+{% for key, value in sysctl_security_params.items() %}
+{{ key }} = {{ value }}
+{% endfor %}

@@ -22,7 +22,8 @@ crash.log
 *.tfstate
 *.tfstate.*
 *.tfvars
-!*.auto.tfvars
+!terraform.auto.tfvars
+!*.example
 terraform.lock.hcl
 
 # ========================

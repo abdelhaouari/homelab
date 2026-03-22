@@ -1,0 +1,21 @@
+# ==============================================================================
+# Managed by Ansible - Do not edit manually
+# ==============================================================================
+# Fail2Ban local configuration file overriding default jail.conf settings.
+
+[DEFAULT]
+# "bantime" is the number of seconds that a host is banned.
+bantime  = {{ fail2ban_bantime }}
+
+# A host is banned if it has generated "maxretry" during the last "findtime".
+findtime  = {{ fail2ban_findtime }}
+
+# "maxretry" is the number of failures before a host gets banned.
+maxretry = {{ fail2ban_maxretry }}
+
+# --- Jails ---
+
+[sshd]
+# Enable the SSH daemon jail to protect against brute-force attacks.
+enabled = true
+port    = ssh

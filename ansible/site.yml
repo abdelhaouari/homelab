@@ -1,0 +1,5 @@
+---
+- name: Apply baseline security hardening to all lab machines
+  hosts: k8s_cluster
+  roles:
+    - baseline

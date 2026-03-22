@@ -1,0 +1,34 @@
+---
+# ==============================================================================
+# defaults/main.yml - Default variables for the baseline security role
+# ==============================================================================
+
+# List of essential security packages to be installed on all target nodes.
+security_baseline_packages:
+  - ufw
+  - fail2ban
+  - auditd
+  - unattended-upgrades
+
+# Define the list of allowed incoming ports for the host-based firewall (UFW).
+ufw_allowed_ports:
+  - { port: 22, proto: tcp, comment: "Allow SSH access for Ansible and Admins" }
+
+# --- Fail2Ban Configuration ---
+# Time in seconds that a malicious host is banned. (3600s = 1 hour)
+fail2ban_bantime: 3600
+# Time window in seconds to count authentication failures. (600s = 10 minutes)
+fail2ban_findtime: 600
+# Number of failures allowed before a host gets banned.
+fail2ban_maxretry: 3
+
+# --- Kernel Hardening (sysctl) ---
+# Dictionary of sysctl parameters to harden the Linux kernel network stack.
+# Note: net.ipv4.ip_forward is set to 0 for a standard secure VM baseline.
+# This MUST be overridden to 1 for machines acting as routers or Kubernetes nodes.
+sysctl_security_params:
+  net.ipv4.ip_forward: 0
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.all.rp_filter: 1

@@ -27,7 +27,13 @@ homelab/
 ├── packer/              # Phase 1 - Golden image builds
 │   └── ubuntu-cloud/    # Ubuntu 24.04 hardened template
 ├── terraform/           # Phase 2 - Infrastructure provisioning
+│   └── environments/
+│       └── lab/         # Lab environment (3 VMs on VLAN 20)
 ├── ansible/             # Phase 3 - Configuration management
+│   ├── inventory/       # Host inventory (YAML)
+│   ├── roles/
+│   │   └── baseline/    # Security hardening role
+│   └── site.yml         # Main playbook
 ├── kubernetes/          # Phase 4 - Cluster deployment (Talos)
 ├── gitops/              # Phase 5 - Flux CD / ArgoCD
 └── docs/                # Architecture diagrams and decisions
@@ -35,23 +41,42 @@ homelab/
 
 ## Phases
 
-- [x] **Phase 0** - Proxmox foundations, ZFS, network segmentation, OPNsense
-- [x] **Phase 1** - Golden image with Packer (Ubuntu 24.04, autoinstall, air-gapped)
-- [ ] **Phase 2** - Infrastructure as Code with Terraform/OpenTofu
-- [ ] **Phase 3** - Configuration management with Ansible
-- [ ] **Phase 4** - Kubernetes cluster (Talos Linux)
-- [ ] **Phase 5** - GitOps & continuous deployment
-- [ ] **Phase 6** - Observability, monitoring & security lab
+- [x] **Phase 0** — Proxmox foundations, ZFS, network segmentation, OPNsense
+- [x] **Phase 1** — Golden image with Packer (Ubuntu 24.04, autoinstall, air-gapped)
+- [x] **Phase 2** — Infrastructure as Code with Terraform (bpg/proxmox, Cloud-Init, `for_each`)
+- [x] **Phase 3** — Configuration management with Ansible (baseline security hardening)
+- [ ] **Phase 4** — Kubernetes cluster (Talos Linux)
+- [ ] **Phase 5** — GitOps & continuous deployment
+- [ ] **Phase 6** — Observability, monitoring & security lab
+
+## IaC Pipeline
+
+The full infrastructure lifecycle is automated and reproducible:
+
+```
+Packer (golden image) → Terraform (VM provisioning) → Ansible (configuration)
+```
+
+If the server is destroyed, everything can be rebuilt from code:
+
+```bash
+cd packer/ubuntu-cloud && packer build -var-file=credentials.pkrvars.hcl .
+cd terraform/environments/lab && terraform apply
+cd ansible && ansible-playbook site.yml
+```
 
 ## Security Principles
 
 Every phase follows these DevSecOps principles:
 
-- **Least privilege** - Dedicated API tokens per tool, no shared credentials
-- **Secrets management** - Sensitive values excluded from Git, `.example` templates provided
-- **Network segmentation** - VLAN isolation with firewall rules between zones
-- **Immutable infrastructure** - Golden images built by code, not configured by hand
-- **Reproducibility** - Destroy and rebuild everything from code
+- **Least privilege** — Dedicated API tokens per tool, no shared credentials
+- **Secrets management** — Sensitive values excluded from Git, `.example` templates provided
+- **Network segmentation** — VLAN isolation with firewall rules between zones
+- **Defense in depth** — Perimeter firewall (OPNsense) + host firewall (UFW) + kernel hardening (sysctl)
+- **Immutable infrastructure** — Golden images built by code, not configured by hand
+- **Configuration as Code** — No manual changes; Ansible enforces desired state and prevents drift
+- **Audit trail** — System-level auditing (auditd) on all managed hosts
+- **Reproducibility** — Destroy and rebuild everything from code
 
 ## Getting Started
 
@@ -61,7 +86,7 @@ Every phase follows these DevSecOps principles:
 - OPNsense (virtualized or physical) for network segmentation
 - WSL Ubuntu or Linux workstation with: Packer, Terraform, Ansible
 
-### Packer (Golden Image)
+### Phase 1 — Packer (Golden Image)
 
 The Packer configuration uses a split-file structure following HashiCorp conventions:
 
@@ -93,4 +118,32 @@ The build takes ~8 minutes and produces a Proxmox template (VM ID 9000) with:
 - Cloud-Init ready for Terraform deployment
 - **Ephemeral Privilege Management:** Uses Cloud-Init to create temporary `NOPASSWD` sudo scaffolding for automation, which is strictly destroyed via a shell provisioner before template sealing.
 - **Aggressive OS Hardening:** SSH password auth disabled, build password locked, bash history purged, and machine-id cleared to prevent IP conflicts across clones.
-- Autoinstall delivered via mounted ISO (air-gapped - no HTTP dependency from WSL).
+- Autoinstall delivered via mounted ISO (air-gapped — no HTTP dependency from WSL).
+
+### Phase 2 — Terraform (VM Provisioning)
+
+```bash
+cd terraform/environments/lab
+cp credentials.auto.tfvars.example credentials.auto.tfvars
+# Edit credentials.auto.tfvars with your Proxmox API token and SSH public key
+terraform init
+terraform plan
+terraform apply
+```
+
+Deploys 3 VMs cloned from the golden image template:
+
+| VM | Hostname | IP | Role |
+|----|----------|----|------|
+| 101 | k8s-ctrl-01 | 10.10.20.10 | Kubernetes control plane |
+| 102 | k8s-work-01 | 10.10.20.11 | Kubernetes worker node |
+| 103 | k8s-work-02 | 10.10.20.12 | Kubernetes worker node |
+
+### Phase 3 — Ansible (Configuration Management)
+
+```bash
+cd ansible
+ansible-playbook site.yml
+```
+
+Applies the `baseline` security hardening role to all managed hosts. See [`ansible/README.md`](ansible/README.md) for details on the role and its configuration.

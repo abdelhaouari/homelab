@@ -1,0 +1,25 @@
+# ==============================================================================
+# Managed by Ansible - Static Auditd Rules
+# ==============================================================================
+
+# 1. Identity and Authentication changes
+# Watch (-w) for write or attribute changes (-p wa) on user/group files
+-w /etc/passwd -p wa -k identity_changes
+-w /etc/shadow -p wa -k identity_changes
+-w /etc/group -p wa -k identity_changes
+
+# 2. Privilege Escalation (Sudoers)
+# Monitor modifications to sudoers configuration
+-w /etc/sudoers -p wa -k privilege_escalation
+-w /etc/sudoers.d/ -p wa -k privilege_escalation
+
+# 3. Network and Firewall Manipulation
+# Monitor execution (-p x) of firewall binaries
+-w /sbin/iptables -p x -k firewall_manipulation
+-w /sbin/nft -p x -k firewall_manipulation
+-w /usr/sbin/ufw -p x -k firewall_manipulation
+
+# 4. Time Modification (System Calls)
+# Monitor system calls that can alter the system clock (assuming 64-bit architecture)
+# Added clock_settime as it is also frequently used for time manipulation
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -S clock_settime -k time_change

@@ -1,0 +1,97 @@
+---
+# ==============================================================================
+# tasks/main.yml - Main execution file for the baseline security role
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. System Updates
+# ------------------------------------------------------------------------------
+- name: Update APT package cache and perform a full system upgrade
+  ansible.builtin.apt:
+    update_cache: yes
+    upgrade: full
+    cache_valid_time: 3600
+
+# ------------------------------------------------------------------------------
+# 2. Package Installation
+# ------------------------------------------------------------------------------
+- name: Install essential security packages
+  ansible.builtin.apt:
+    name: "{{ security_baseline_packages }}"
+    state: present
+
+# ------------------------------------------------------------------------------
+# 3. UFW (Uncomplicated Firewall) Configuration
+# ------------------------------------------------------------------------------
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Set UFW default outgoing policy to allow
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+- name: Allow essential incoming ports based on defaults defined list
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment }}"
+  # Loop iterates over the list of dictionaries defined in defaults/main.yml
+  loop: "{{ ufw_allowed_ports }}"
+
+- name: Enable UFW and ensure it starts on boot
+  community.general.ufw:
+    state: enabled
+
+# ------------------------------------------------------------------------------
+# 4. Fail2Ban Configuration
+# ------------------------------------------------------------------------------
+- name: Deploy Fail2Ban local jail configuration template
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  # The 'notify' keyword triggers the handler only if the template file changes
+  notify: Restart Fail2Ban
+
+- name: Ensure Fail2Ban service is enabled and running on boot
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+# ------------------------------------------------------------------------------
+# 5. Kernel Hardening (sysctl)
+# ------------------------------------------------------------------------------
+- name: Deploy sysctl security hardening configuration
+  ansible.builtin.template:
+    src: 99-security-hardening.conf.j2
+    dest: /etc/sysctl.d/99-security-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl config
+
+# ------------------------------------------------------------------------------
+# 6. Auditd Framework Configuration
+# ------------------------------------------------------------------------------
+- name: Deploy static auditd hardening rules
+  ansible.builtin.copy:
+    src: audit.rules
+    dest: /etc/audit/rules.d/hardening.rules
+    owner: root
+    group: root
+    # 0640 is crucial: only root should read these rules, group read for audit group
+    mode: "0640"
+  notify: Reload auditd rules
+
+- name: Ensure auditd service is enabled and running
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: yes
+    state: started
