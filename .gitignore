@@ -41,3 +41,7 @@ Thumbs.db
 *~
 .vscode/
 .idea/
+
+# Talos cluster secrets and configs (Phase 4)
+talos/clusterconfig/
+talos/clusterconfig/kubeconfig
