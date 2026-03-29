@@ -45,3 +45,6 @@ Thumbs.db
 # Talos cluster secrets and configs (Phase 4)
 talos/clusterconfig/
 talos/clusterconfig/kubeconfig
+
+# Sealed Secrets private key backup (NEVER commit)
+sealed-secrets-key-backup.yaml
