@@ -5,7 +5,7 @@ Post-deployment configuration for all lab VMs using Ansible. This layer sits aft
 ## Pipeline Position
 
 ```
-Packer (golden image) → Terraform (VM provisioning) → Ansible (configuration) ← you are here
+Packer (golden image) → Terraform (VM provisioning) → Ansible (configuration)
 ```
 
 ## Quick Start
