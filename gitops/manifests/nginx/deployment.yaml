@@ -47,6 +47,19 @@ spec:
               mountPath: /var/cache/nginx
             - name: run
               mountPath: /var/run
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      automountServiceAccountToken: false      
       volumes:
         - name: tmp
           emptyDir: {}
