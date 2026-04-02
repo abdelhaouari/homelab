@@ -25,7 +25,7 @@ spec:
             - "ghcr.io/abdelhaouari/*"
           imageRegistryCredentials:
             secrets:
-              - ghcr-secret
+              - kyverno/ghcr-secret
           attestors:
             - entries:
                 - keyless:

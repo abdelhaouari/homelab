@@ -22,7 +22,7 @@ spec:
       serviceAccountName: nginx-sa
       automountServiceAccountToken: true
       imagePullSecrets:
-        - name: ghcr-secret
+        - name: nginx-test/ghcr-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
