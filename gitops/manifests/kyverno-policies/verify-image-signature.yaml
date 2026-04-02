@@ -21,27 +21,13 @@ spec:
           - resources:
               kinds:
                 - Pod
-      validate:
-        message: "Images from ghcr.io/abdelhaouari must be signed with Cosign."
-        foreach:
-          - list: "request.object.spec.containers"
-            context:
-              - name: imageRef
-                variable:
-                  value: "{{ element.image }}"
-            preconditions:
-              all:
-                - key: "{{ imageRef }}"
-                  operator: Equals
-                  value: "ghcr.io/abdelhaouari/*"
-            validate:
-              message: "Image {{ imageRef }} is not signed. All images from ghcr.io/abdelhaouari must be signed with Cosign."
-              imageReferences:
-                - "ghcr.io/abdelhaouari/*"
-              attestors:
-                - entries:
-                    - keyless:
-                        subject: "*abdelhaouari*"
-                        issuer: "https://github.com/login/oauth"
-                        rekor:
-                          url: https://rekor.sigstore.dev
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/abdelhaouari/*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "*abdelhaouari*"
+                    issuer: "https://github.com/login/oauth"
+                    rekor:
+                      url: https://rekor.sigstore.dev
