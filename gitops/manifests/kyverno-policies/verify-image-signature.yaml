@@ -8,8 +8,7 @@ metadata:
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
       Images from ghcr.io/abdelhaouari must be signed with Cosign
-      using keyless signing via GitHub OIDC. This ensures only
-      trusted images are deployed to the cluster.
+      using keyless signing via GitHub OIDC.
 spec:
   validationFailureAction: Enforce
   webhookTimeoutSeconds: 30
@@ -24,6 +23,9 @@ spec:
       verifyImages:
         - imageReferences:
             - "ghcr.io/abdelhaouari/*"
+          imageRegistryCredentials:
+            secrets:
+              - ghcr-secret
           attestors:
             - entries:
                 - keyless:
