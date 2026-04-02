@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signature
+  annotations:
+    policies.kyverno.io/title: Verify Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Images from ghcr.io/abdelhaouari must be signed with Cosign
+      using keyless signing via GitHub OIDC. This ensures only
+      trusted images are deployed to the cluster.
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  background: false
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Images from ghcr.io/abdelhaouari must be signed with Cosign."
+        foreach:
+          - list: "request.object.spec.containers"
+            context:
+              - name: imageRef
+                variable:
+                  value: "{{ element.image }}"
+            preconditions:
+              all:
+                - key: "{{ imageRef }}"
+                  operator: Equals
+                  value: "ghcr.io/abdelhaouari/*"
+            validate:
+              message: "Image {{ imageRef }} is not signed. All images from ghcr.io/abdelhaouari must be signed with Cosign."
+              imageReferences:
+                - "ghcr.io/abdelhaouari/*"
+              attestors:
+                - entries:
+                    - keyless:
+                        subject: "*abdelhaouari*"
+                        issuer: "https://github.com/login/oauth"
+                        rekor:
+                          url: https://rekor.sigstore.dev
