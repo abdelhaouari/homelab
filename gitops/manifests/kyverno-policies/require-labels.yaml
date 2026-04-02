@@ -27,6 +27,7 @@ spec:
                 - kyverno
                 - metallb-system
                 - argocd
+                - vault
       validate:
         message: "The label 'app' is required on all pods."
         pattern:

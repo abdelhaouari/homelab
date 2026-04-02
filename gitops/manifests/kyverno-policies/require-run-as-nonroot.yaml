@@ -26,6 +26,7 @@ spec:
                 - kube-system
                 - kyverno
                 - metallb-system
+                - vault
       validate:
         message: "Containers must set securityContext.runAsNonRoot to true."
         pattern:
