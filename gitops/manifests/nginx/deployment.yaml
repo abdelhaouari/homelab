@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         app: nginx
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "nginx-test-role"
+        vault.hashicorp.com/agent-inject-secret-credentials: "homelab/data/nginx-test/credentials"      
     spec:
       securityContext:
         runAsNonRoot: true
@@ -59,7 +63,8 @@ spec:
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
-      automountServiceAccountToken: false      
+      serviceAccountName: nginx-sa
+      automountServiceAccountToken: true      
       volumes:
         - name: tmp
           emptyDir: {}
