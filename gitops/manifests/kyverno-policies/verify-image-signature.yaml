@@ -8,9 +8,10 @@ metadata:
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
       Images from ghcr.io/abdelhaouari must be signed with Cosign
-      using keyless signing via GitHub OIDC.
+      using keyless signing via GitHub OIDC. Policy set to Audit
+      due to GHCR OCI Referrers API limitation with Kyverno.
 spec:
-  validationFailureAction: Enforce
+  validationFailureAction: Audit
   webhookTimeoutSeconds: 30
   background: false
   rules:
@@ -23,9 +24,11 @@ spec:
       verifyImages:
         - imageReferences:
             - "ghcr.io/abdelhaouari/*"
+          mutateDigest: false
+          verifyDigest: false
           imageRegistryCredentials:
             secrets:
-              - kyverno/ghcr-secret
+              - ghcr-secret
           attestors:
             - entries:
                 - keyless:
