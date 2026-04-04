@@ -1,0 +1,56 @@
+# kube-prometheus-stack Helm values
+# Tailored for Talos Linux + Cilium (no kube-proxy)
+
+# -- Prometheus --
+prometheus:
+  prometheusSpec:
+    # No PV provisioner on Talos — use emptyDir (data lost on restart)
+    storageSpec: {}
+    # Scrape all ServiceMonitors across all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    # Retention — 7 days is enough for a lab
+    retention: 7d
+
+# -- Grafana --
+grafana:
+  # Expose via MetalLB (next free IP in 10.10.20.100-150 range)
+  service:
+    type: LoadBalancer
+  # Default admin credentials (change password after first login)
+  adminUser: admin
+  adminPassword: "changeme-grafana-2026"
+  # Sidecar auto-discovers ConfigMap dashboards and datasources
+  sidecar:
+    dashboards:
+      enabled: true
+    datasources:
+      enabled: true
+
+# -- Alertmanager --
+alertmanager:
+  alertmanagerSpec:
+    storageSpec: {}
+
+# -- Node Exporter --
+# Runs as DaemonSet — exposes host-level metrics (CPU, RAM, disk, network)
+nodeExporter:
+  enabled: true
+
+# -- Kube State Metrics --
+# Exposes Kubernetes object metrics (deployments, pods, nodes status)
+kubeStateMetrics:
+  enabled: true
+
+# -- Disable ServiceMonitors for components that don't exist on Talos --
+# kube-proxy is replaced by Cilium
+kubeProxy:
+  enabled: false
+# etcd uses mTLS on Talos — not scrapable without certs
+kubeEtcd:
+  enabled: false
+# Scheduler and controller-manager bind to localhost on Talos
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false

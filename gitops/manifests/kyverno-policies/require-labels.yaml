@@ -29,6 +29,7 @@ spec:
                 - argocd
                 - vault
                 - falco
+                - monitoring
       validate:
         message: "The label 'app' is required on all pods."
         pattern:

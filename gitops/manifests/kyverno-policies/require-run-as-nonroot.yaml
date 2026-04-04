@@ -28,6 +28,7 @@ spec:
                 - metallb-system
                 - vault
                 - falco
+                - monitoring
       validate:
         message: "Containers must set securityContext.runAsNonRoot to true."
         pattern:
