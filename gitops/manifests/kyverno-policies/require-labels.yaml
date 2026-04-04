@@ -28,6 +28,7 @@ spec:
                 - metallb-system
                 - argocd
                 - vault
+                - falco
       validate:
         message: "The label 'app' is required on all pods."
         pattern:

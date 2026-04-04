@@ -27,6 +27,7 @@ spec:
                 - kyverno
                 - metallb-system
                 - vault
+                - falco
       validate:
         message: "Containers must set securityContext.runAsNonRoot to true."
         pattern:
