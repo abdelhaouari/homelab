@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-netpol
+  namespace: nginx-test
+  labels:
+    app: nginx
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow health checks and traffic from anywhere on port 8080
+    # (kubelet probes, MetalLB, external clients via LoadBalancer)
+    - ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # Allow DNS resolution (CoreDNS)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow Vault Agent sidecar to reach Vault server
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+
+    # Allow Vault Agent to reach the Kubernetes API (for auth)
+    - to:
+        - ipBlock:
+            cidr: 10.10.20.10/32
+      ports:
+        - protocol: TCP
+          port: 6443

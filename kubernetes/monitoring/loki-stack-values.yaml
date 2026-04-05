@@ -1,0 +1,19 @@
+# Loki-Stack Helm values
+# Lightweight log aggregation for homelab
+
+loki:
+  # Single-instance mode (no clustering needed for a lab)
+  persistence:
+    enabled: false # emptyDir — logs lost on restart, acceptable for lab
+  # Keep logs for 3 days
+  config:
+    limits_config:
+      retention_period: 72h
+    compactor:
+      retention_enabled: true
+
+promtail:
+  enabled: true
+  config:
+    clients:
+      - url: http://loki-stack.monitoring:3100/loki/api/v1/push
