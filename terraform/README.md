@@ -1,43 +1,123 @@
 # Terraform — Infrastructure Provisioning
 
-Phase 2: Declarative VM provisioning from Packer golden image templates using the bpg/proxmox provider.
+This directory contains Terraform configurations for provisioning VMs on Proxmox VE using the [bpg/proxmox](https://registry.terraform.io/providers/bpg/proxmox) provider.
 
-## Architecture
+## Environments
 
-All VMs are full clones of the Packer-built Ubuntu 24.04 template (ID 9000). Cloud-Init injects static IPs, SSH keys, and hostnames at first boot.
+### `environments/talos/` — Talos Linux VMs (Active)
 
-| VM | ID | Hostname | IP | Role |
-|----|----|----------|-----|------|
-| Control Plane | 101 | k8s-ctrl-01 | 10.10.20.10 | Kubernetes control plane |
-| Worker 1 | 102 | k8s-work-01 | 10.10.20.11 | Kubernetes worker node |
-| Worker 2 | 103 | k8s-work-02 | 10.10.20.12 | Kubernetes worker node |
+Provisions 3 VMs for the Kubernetes cluster running Talos Linux, an immutable, API-only OS.
+
+| Resource        | VM ID | Hostname      | IP           | Role          | Cores | RAM    |
+|-----------------|-------|---------------|--------------|---------------|-------|--------|
+| `talos_vm[ctrl]`| 201   | talos-ctrl-01 | 10.10.20.10  | Control plane | 2     | 4096 MB|
+| `talos_vm[w1]`  | 202   | talos-work-01 | 10.10.20.11  | Worker        | 2     | 4096 MB|
+| `talos_vm[w2]`  | 203   | talos-work-02 | 10.10.20.12  | Worker        | 2     | 4096 MB|
+
+**Key design decisions:**
+- `for_each` on a map (not `count`) — allows adding/removing nodes without index shifting
+- `file_id` imports the Talos disk image directly (no Cloud-Init, no clone)
+- `stop_on_destroy = true` — Talos has no QEMU Guest Agent, graceful shutdown isn't possible
+- SSH block in the provider is required for `file_id` to upload the disk image to Proxmox
+
+### `environments/lab/` — Ubuntu VMs (Code Preserved, VMs Destroyed)
+
+Original Phase 2 configuration that clones from the Packer golden image (template ID 9000). Uses Cloud-Init for IP assignment and SSH key injection. VMs were destroyed when replaced by Talos in Phase 4.
+
+The code is preserved as a reusable template for future non-Kubernetes VMs.
 
 ## File Structure
 
-| File | Purpose | Git tracked? |
-|------|---------|--------------|
-| `provider.tf` | Provider and Terraform version constraints | Yes |
-| `variables.tf` | Variable declarations with types and descriptions | Yes |
-| `main.tf` | VM resources (clone, Cloud-Init, network) | Yes |
-| `outputs.tf` | Post-deploy info (IPs, SSH commands) | Yes |
-| `terraform.auto.tfvars` | Non-sensitive values (auto-loaded) | Yes |
-| `credentials.auto.tfvars` | Secrets: API token, SSH key (auto-loaded) | **No** |
-| `credentials.auto.tfvars.example` | Template for required secrets | Yes |
+```
+terraform/
+├── README.md
+├── modules/                          # Shared modules (future use)
+│   └── .gitkeep
+└── environments/
+    ├── lab/                          # Ubuntu VMs (Phase 2)
+    │   ├── provider.tf               # bpg/proxmox ~0.78
+    │   ├── variables.tf
+    │   ├── main.tf                   # for_each, clone, Cloud-Init
+    │   ├── outputs.tf
+    │   ├── terraform.auto.tfvars     # Non-sensitive values
+    │   └── credentials.auto.tfvars.example
+    └── talos/                        # Talos VMs (Phase 4 — ACTIVE)
+        ├── .terraform.lock.hcl       # Provider lock file
+        ├── provider.tf               # bpg/proxmox ~0.78 + ssh {}
+        ├── variables.tf
+        ├── main.tf                   # for_each, disk file_id import
+        ├── outputs.tf
+        ├── terraform.auto.tfvars     # VM map (non-sensitive)
+        └── credentials.auto.tfvars.example
+```
 
 ## Usage
 
 ```bash
-cd terraform/environments/lab
+cd environments/talos
+
+# First time — copy and fill in credentials
 cp credentials.auto.tfvars.example credentials.auto.tfvars
-# Edit credentials.auto.tfvars with your Proxmox API token and SSH public key
+# Edit: proxmox_api_token_id, proxmox_api_token_secret
+
 terraform init
 terraform plan
 terraform apply
 ```
 
-## Security Notes
+## Credentials
 
-- **State file** (`terraform.tfstate`) contains sensitive data and is excluded from Git
-- **API token** uses the same `admin@pve!packer` token with least-privilege access
-- **SSH keys** are injected via Cloud-Init — password authentication is disabled in the template
-- **Cloud-Init handoff**: Packer builds the image, Terraform configures the instance
+Sensitive values are stored in `credentials.auto.tfvars` (excluded from Git via `.gitignore`). The `.example` file shows the required variables:
+
+```hcl
+proxmox_api_token_id     = "admin@pve!packer"
+proxmox_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+The provider uses a single `api_token` string in the format `"user@realm!token=secret-uuid"`, constructed from these two variables.
+
+## Provider Configuration
+
+```hcl
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.78"
+    }
+  }
+}
+```
+
+The Talos environment also requires an SSH connection to Proxmox for the `file_id` disk import:
+
+```hcl
+provider "proxmox" {
+  endpoint  = var.proxmox_api_url
+  api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
+  insecure  = true
+
+  ssh {
+    agent    = false
+    username = "root"
+    port     = 2222
+    private_key = file("~/.ssh/id_ed25519")
+  }
+}
+```
+
+## Key Differences: Ubuntu vs Talos
+
+| Aspect           | Ubuntu (`lab/`)                  | Talos (`talos/`)                    |
+|------------------|----------------------------------|-------------------------------------|
+| Source           | `clone {}` from template 9000   | `disk { file_id }` raw image import|
+| Configuration    | Cloud-Init (`initialization {}`) | Talos API (`talosctl apply-config`) |
+| QEMU Agent       | Enabled                          | Disabled (Talos has no agent)       |
+| Shutdown         | Graceful via agent               | `stop_on_destroy = true`            |
+| SSH in provider  | Not needed                       | Required for `file_id` upload       |
+
+## Important Notes
+
+- **No `local-lvm`** — this Proxmox uses ZFS. Disk `datastore_id` must be `local-zfs`
+- **State files are local** and excluded from Git (`.gitignore` covers `*.tfstate*` and `.terraform/`)
+- **`for_each` over `count`** — preferred for VM maps to avoid index-based recreation on changes
