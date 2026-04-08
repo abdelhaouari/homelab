@@ -29,6 +29,7 @@ spec:
                 - vault
                 - falco
                 - monitoring
+                - argocd
       validate:
         message: "Containers must set securityContext.runAsNonRoot to true."
         pattern:

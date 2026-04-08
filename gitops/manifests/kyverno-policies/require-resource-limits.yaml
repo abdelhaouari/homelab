@@ -29,6 +29,7 @@ spec:
                 - vault
                 - falco
                 - monitoring
+                - argocd
       validate:
         message: "CPU and memory limits are required for all containers."
         pattern:
