@@ -17,3 +17,9 @@ promtail:
   config:
     clients:
       - url: http://loki-stack.monitoring:3100/loki/api/v1/push
+
+# Disable auto-created datasource — we manage our own via loki-datasource ConfigMap
+grafana:
+  sidecar:
+    datasources:
+      enabled: false

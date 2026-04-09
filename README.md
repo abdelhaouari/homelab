@@ -28,7 +28,7 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 |---------------|----------------------------------------------------|
 | Hypervisor    | Proxmox VE 9.1.6, ZFS RAIDZ-1 (~916 GB)          |
 | Firewall      | OPNsense 26.1 (virtualized, router-on-a-stick)    |
-| Kubernetes    | Talos Linux v1.12.6 — 3-node cluster (K8s v1.35.2)|
+| Kubernetes    | Talos Linux v1.12.6 — 4-node cluster (1 ctrl + 3 workers, K8s v1.35.2)|
 | CNI           | Cilium (eBPF) replacing Flannel + kube-proxy       |
 | GitOps        | ArgoCD v3.3.6 (App of Apps pattern)                |
 | Monitoring    | Prometheus + Grafana + Loki                        |
@@ -48,17 +48,20 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 | Node          | IP          | Role          | OS                        |
 |---------------|-------------|---------------|---------------------------|
 | talos-ctrl-01 | 10.10.20.10 | Control plane | Talos Linux (immutable)   |
-| talos-work-01 | 10.10.20.11 | Worker        | Talos Linux (immutable)   |
-| talos-work-02 | 10.10.20.12 | Worker        | Talos Linux (immutable)   |
+| talos-work-01 | 10.10.20.11 | Worker (6 GB) | Talos Linux (immutable)   |
+| talos-work-02 | 10.10.20.12 | Worker (6 GB) | Talos Linux (immutable)   |
+| talos-work-03 | 10.10.20.13 | Worker (6 GB) | Talos Linux (immutable)   |
 
-### Exposed Services (MetalLB L2/ARP)
+### Exposed Services (MetalLB L2/ARP, FRR disabled)
 
 | IP             | Service     | Purpose                        |
 |----------------|-------------|--------------------------------|
-| 10.10.20.100   | Hubble UI   | Network flow observability     |
-| 10.10.20.101   | ArgoCD UI   | GitOps dashboard               |
-| 10.10.20.102   | nginx-test  | Hardened test application       |
-| 10.10.20.103   | Grafana     | Metrics and log dashboards     |
+| 10.10.20.100   | ArgoCD UI   | GitOps dashboard               |
+| 10.10.20.101   | nginx-test  | Hardened test application       |
+| 10.10.20.102   | Grafana     | Metrics and log dashboards     |
+| 10.10.20.103   | Hubble UI   | Network flow observability     |
+
+> IPs are dynamically assigned by MetalLB. After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
 
 ---
 
@@ -82,7 +85,7 @@ This lab implements defense in depth across 6 security domains, using tools that
 |---------|---------------------------------------------------|-------|
 | Kyverno | Kubernetes admission controller — 6 ClusterPolicies enforced | 6a |
 | Vault   | Secrets injection via sidecar (Kubernetes auth, KV v2) | 6b |
-| Falco   | eBPF-based runtime threat detection (MITRE ATT&CK mapped) | 6c |
+| Falco   | Modern eBPF runtime threat detection (MITRE ATT&CK mapped) | 6c |
 | Cilium NetworkPolicy | Pod-level ingress/egress firewall (deny-by-default) | 7b |
 
 ### Observability
@@ -128,6 +131,33 @@ A simulated attack was executed against the hardened nginx deployment to validat
 | Read ServiceAccount token | Readable (required for Vault) — **no RBAC permissions** | Documented trade-off |
 
 All alerts are centralized in Grafana via Loki for investigation.
+
+---
+
+## Chaos Engineering — Resilience Validated
+
+Chaos tests were conducted to validate that the platform self-heals under real failure conditions.
+
+### Test 1: GitOps Self-Heal
+
+`kubectl delete namespace nginx-test` — ArgoCD detected the drift and recreated all resources (namespace, deployment, service, networkpolicy, sealedsecret, serviceaccount) in **~18 seconds**. Zero manual intervention.
+
+### Test 2: Node Failure
+
+A worker node was stopped (hard power-off in Proxmox) to simulate hardware failure. Kubernetes rescheduled workloads to surviving workers automatically. The test also revealed 4 latent issues — all resolved:
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Vault SPOF | Single replica, dev mode (in-memory) | Documented; HA mode for production |
+| Kyverno blocking ArgoCD | Pre-existing pods lacked `resources.limits` | Added `argocd` to policy exclusions |
+| MetalLB speaker crash loop | FRR/BGP enabled but unused (L2 mode) | Disabled FRR (`speaker.frr.enabled=false`) |
+| Grafana crash on restart | Duplicate Loki datasource with `isDefault: true` | Disabled auto-datasource in loki-stack chart |
+
+**Outcome**: Rebuilt cluster from scratch in ~30 minutes using the IaC runbook — 4 nodes, 59 pods, zero crashes.
+
+### Test 3: Network Segmentation Audit (Hubble)
+
+Hubble UI provided real-time visual proof of NetworkPolicy enforcement — forwarded flows (legitimate traffic on port 8080) and dropped flows (unauthorized access on port 9090) displayed on a live service map.
 
 ---
 
@@ -186,16 +216,17 @@ homelab/
 - [x] **Phase 1** — Golden image with Packer (Ubuntu 24.04, air-gapped autoinstall, OS hardening)
 - [x] **Phase 2** — Infrastructure as Code with Terraform (bpg/proxmox, Cloud-Init, `for_each`)
 - [x] **Phase 3** — Configuration management with Ansible (UFW, Fail2Ban, sysctl, auditd)
-- [x] **Phase 4** — Kubernetes with Talos Linux (immutable OS, mTLS, API-only, etcd encryption)
+- [x] **Phase 4** — Kubernetes with Talos Linux (immutable OS, mTLS, API-only, 4 nodes, etcd encryption)
 - [x] **Phase 4b** — Cilium (eBPF CNI, kube-proxy replacement), Hubble, MetalLB (L2/ARP)
 - [x] **Phase 5a** — GitOps: ArgoCD (App of Apps, self-heal), Sealed Secrets
 - [x] **Phase 5b** — Shift-left security: Trivy (CVE + misconfig), Checkov (CIS benchmarks)
 - [x] **Phase 5c** — Supply chain: Cosign keyless signing (Sigstore/Fulcio/Rekor), SBOM (SPDX 2.3)
 - [x] **Phase 6a** — Policy enforcement: Kyverno (6 ClusterPolicies, 5 Enforce + 1 Audit)
 - [x] **Phase 6b** — Secrets management: HashiCorp Vault (KV v2, Kubernetes auth, sidecar injection)
-- [x] **Phase 6c** — Runtime security: Falco (eBPF, MITRE ATT&CK mapped, Falcosidekick)
+- [x] **Phase 6c** — Runtime security: Falco (modern eBPF, MITRE ATT&CK mapped, Falcosidekick)
 - [x] **Phase 7a** — Observability: Prometheus + Grafana (20+ dashboards), Loki + Promtail
 - [x] **Phase 7b** — Network segmentation: Cilium NetworkPolicies + attack scenario validation
+- [x] **Phase J2-1** — Chaos engineering: self-heal, node failure resilience, Hubble network audit
 
 ---
 
@@ -222,23 +253,30 @@ talosctl bootstrap --endpoints 10.10.20.10 --nodes 10.10.20.10
 
 # 3. Install networking
 helm install cilium cilium/cilium --namespace kube-system [...]
-helm install metallb metallb/metallb --namespace metallb-system --create-namespace
+helm install metallb metallb/metallb --namespace metallb-system --create-namespace \
+  --set speaker.frr.enabled=false
 
 # 4. Install GitOps (ArgoCD syncs everything else from Git)
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
+  --server-side --force-conflicts
 argocd app create root --repo https://github.com/abdelhaouari/homelab.git \
   --path gitops/apps --sync-policy automated --auto-prune --self-heal
 
 # 5. Install security stack
 helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace
-helm install vault hashicorp/vault --namespace vault --create-namespace --set server.dev.enabled=true
-helm install falco falcosecurity/falco --namespace falco --create-namespace
+helm install vault hashicorp/vault --namespace vault --create-namespace \
+  --set server.dev.enabled=true --set injector.enabled=true
+helm install falco falcosecurity/falco --namespace falco --create-namespace \
+  --set driver.kind=modern_ebpf --set falcosidekick.enabled=true \
+  --set falcosidekick.webui.enabled=false
 
 # 6. Install observability
 helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace monitoring --values kubernetes/monitoring/kube-prometheus-stack-values.yaml
 helm install loki-stack grafana/loki-stack \
   --namespace monitoring --values kubernetes/monitoring/loki-stack-values.yaml
+# Important: loki-stack-values.yaml must set grafana.sidecar.datasources.enabled=false
+# to avoid duplicate default datasource conflict with Prometheus
 ```
 
 ### Build Ubuntu Golden Image (for non-K8s VMs)
@@ -305,7 +343,7 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Ansible | Configuration management | Deployed |
 | Talos Linux | Immutable Kubernetes OS | Deployed |
 | Cilium + Hubble | eBPF CNI / Network observability | Deployed |
-| MetalLB | Bare-metal load balancer | Deployed |
+| MetalLB | Bare-metal load balancer (L2/ARP, FRR disabled) | Deployed |
 | ArgoCD | GitOps continuous delivery | Deployed |
 | Sealed Secrets | Encrypted secrets in Git | Deployed |
 | Trivy | CVE + IaC scanner | Deployed |
@@ -313,6 +351,6 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Cosign (Sigstore) | Image signing + verification | Deployed |
 | Kyverno | Policy enforcement (admission) | Deployed |
 | HashiCorp Vault | Secrets management | Deployed |
-| Falco | Runtime threat detection (eBPF) | Deployed |
+| Falco | Runtime threat detection (modern eBPF) | Deployed |
 | Prometheus + Grafana | Metrics + dashboards | Deployed |
 | Loki + Promtail | Log aggregation | Deployed |

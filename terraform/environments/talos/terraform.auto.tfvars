@@ -25,7 +25,7 @@ talos_vms = {
     hostname  = "talos-work-01"
     ip        = "10.10.20.11"
     cores     = 2
-    memory    = 4096
+    memory    = 6144
     disk_size = 20
     tags      = ["kubernetes", "worker", "terraform"]
   }
@@ -34,7 +34,16 @@ talos_vms = {
     hostname  = "talos-work-02"
     ip        = "10.10.20.12"
     cores     = 2
-    memory    = 4096
+    memory    = 6144
+    disk_size = 20
+    tags      = ["kubernetes", "worker", "terraform"]
+  }
+  work-03 = {
+    vm_id     = 204
+    hostname  = "talos-work-03"
+    ip        = "10.10.20.13"
+    cores     = 2
+    memory    = 6144
     disk_size = 20
     tags      = ["kubernetes", "worker", "terraform"]
   }

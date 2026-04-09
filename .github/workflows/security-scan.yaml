@@ -1,0 +1,39 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checkov:
+    name: Checkov IaC Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov on Kubernetes manifests
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: gitops/manifests/
+          framework: kubernetes
+          quiet: true
+          soft_fail: false
+          skip_check: CKV_K8S_38
+
+  trivy:
+    name: Trivy Misconfiguration Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: gitops/manifests/
+          severity: HIGH,CRITICAL
+          exit-code: 1
