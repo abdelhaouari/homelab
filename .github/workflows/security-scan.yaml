@@ -3,8 +3,18 @@ name: Security Scan
 on:
   push:
     branches: [main]
+    paths:
+      - 'gitops/manifests/**'
+      - 'terraform/**'
+      - 'packer/**'
+      - 'ansible/**'
   pull_request:
     branches: [main]
+    paths:
+      - 'gitops/manifests/**'
+      - 'terraform/**'
+      - 'packer/**'
+      - 'ansible/**'
 
 jobs:
   checkov:
