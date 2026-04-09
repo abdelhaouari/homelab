@@ -1,5 +1,7 @@
 # Homelab — Enterprise-Grade DevSecOps Platform
 
+[![Security Scan](https://github.com/abdelhaouari/homelab/actions/workflows/security-scan.yaml/badge.svg)](https://github.com/abdelhaouari/homelab/actions/workflows/security-scan.yaml)
+
 Production-style home lab implementing a complete DevSecOps pipeline on bare-metal Kubernetes. Every layer — from VM provisioning to runtime threat detection — is automated, security-hardened, and deployed as code.
 
 **If the server is destroyed, everything rebuilds from this repo.**
