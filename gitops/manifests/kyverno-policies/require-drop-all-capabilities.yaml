@@ -30,6 +30,7 @@ spec:
                 - falco
                 - monitoring
                 - argocd
+                - local-path-storage
       validate:
         message: "Containers must drop ALL capabilities."
         deny:

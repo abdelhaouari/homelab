@@ -30,6 +30,7 @@ spec:
                 - vault
                 - falco
                 - monitoring
+                - local-path-storage
       validate:
         message: "The label 'app' is required on all pods."
         pattern:
