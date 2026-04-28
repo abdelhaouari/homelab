@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-netpol
+  namespace: podinfo
+  labels:
+    app: redis
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only Podinfo can reach Redis
+    - from:
+        - podSelector:
+            matchLabels:
+              app: podinfo
+      ports:
+        - protocol: TCP
+          port: 6379
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Vault (for sidecar auth + secret renewal)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+    # API Server (for SA auth with Vault)
+    - to:
+        - ipBlock:
+            cidr: 10.10.20.10/32
+      ports:
+        - protocol: TCP
+          port: 6443
