@@ -62,6 +62,7 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 | 10.10.20.101   | nginx-test  | Hardened test application       |
 | 10.10.20.102   | Grafana     | Metrics and log dashboards     |
 | 10.10.20.103   | Hubble UI   | Network flow observability     |
+| 10.10.20.104   | Podinfo     | Multi-tier microservices app   |
 
 > IPs are dynamically assigned by MetalLB. After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
 
@@ -80,6 +81,7 @@ This lab implements defense in depth across 6 security domains, using tools that
 | Checkov           | IaC security scanning (CIS benchmarks)    | 5b    |
 | Cosign (Sigstore) | Keyless image signing via OIDC + Fulcio/Rekor | 5c |
 | SBOM (SPDX 2.3)   | Software Bill of Materials attached to images | 5c |
+| GitHub Actions     | CI pipeline: Checkov + Trivy on every push/PR | J2-2 |
 
 ### Runtime Security
 
@@ -163,10 +165,71 @@ Hubble UI provided real-time visual proof of NetworkPolicy enforcement — forwa
 
 ---
 
+## CI/CD Pipeline — GitHub Actions
+
+Every push and pull request to `main` triggers automated security scanning on infrastructure-as-code and Kubernetes manifests.
+
+| Job | Tool | Scope | Failure mode |
+|-----|------|-------|--------------|
+| Checkov | bridgecrewio/checkov-action | `gitops/manifests/` — CIS benchmarks | `soft_fail: false` — pipeline fails on any finding |
+| Trivy | aquasecurity/trivy-action | `gitops/manifests/` — HIGH/CRITICAL misconfigs | `exit-code: 1` — pipeline fails on findings |
+
+Both jobs run in parallel on `ubuntu-latest`, triggered only on changes to `gitops/`, `terraform/`, `packer/`, or `ansible/` (path filters prevent unnecessary runs on docs or README changes).
+
+Documented trade-offs are skipped in CI rather than lowering global severity: `CKV_K8S_38` (ServiceAccount token for Vault Agent), `CKV_K8S_35` (env var secret for distroless images), `CKV_K8S_40` (Redis UID 999 from official image).
+
+---
+
+## Microservices Application — Podinfo + Redis
+
+A multi-tier cloud-native application deployed from scratch using the full security stack, with no tutorials — only documentation and prior knowledge from building the platform.
+
+```
+Namespace: podinfo
+├── Podinfo (2 replicas, distroless)
+│   ├── Port 9898 — HTTP API + UI + /metrics
+│   ├── Secret delivery: SealedSecret → env var (distroless has no shell)
+│   └── ServiceMonitor → Prometheus scrape every 15s
+│
+├── Redis (1 replica, Alpine + Vault Agent sidecar)
+│   ├── Port 6379 — cache backend
+│   └── Secret delivery: Vault Agent → file → sh -c exec redis-server
+│
+├── NetworkPolicies (zero-trust)
+│   ├── Podinfo: ingress 9898, egress → Redis + DNS only
+│   └── Redis: ingress 6379 from Podinfo only, egress → DNS + Vault + API server
+│
+└── Cache validated end-to-end: POST /cache/key → GET /cache/key
+```
+
+**Dual secret delivery** — the same Redis password lives in Vault (single source of truth) but is delivered through two different mechanisms depending on the image runtime: Vault Agent sidecar writes files for Alpine images (Redis), while SealedSecrets deliver env vars for distroless images (Podinfo) that have no shell to read files. In production, the Vault Secrets Operator (VSO) would synchronize Vault to Kubernetes Secrets automatically.
+
+All containers pass the 6 Kyverno policies. Both images use digest pinning (no mutable tags).
+
+---
+
+## Persistent Storage — CSI Driver
+
+Stateful workloads (Prometheus, Grafana, Loki) previously used `emptyDir` — data lost on every pod restart. `local-path-provisioner` (Rancher) solves this on Talos Linux where `/var/` is the only writable persistent path.
+
+| Component | PVC | Size | Data persisted |
+|-----------|-----|------|---------------|
+| Prometheus | Bound | 10 Gi | TSDB metrics (7-day retention) |
+| Grafana | Bound | 1 Gi | SQLite database (preferences, UI state) |
+| Loki | Bound | 5 Gi | Log index and chunks (72h retention) |
+
+StorageClass `local-path` is marked as default with `WaitForFirstConsumer` binding. Data is node-local (SPOF) — acceptable trade-off for a homelab, documented.
+
+---
+
 ## Project Structure
 
 ```
 homelab/
+├── .github/
+│   └── workflows/
+│       └── security-scan.yaml       # CI: Checkov + Trivy on push/PR (path-filtered)
+│
 ├── packer/                          # Phase 1 — Golden image builds
 │   └── ubuntu-cloud/                # Ubuntu 24.04 hardened template (air-gapped autoinstall)
 │
@@ -184,15 +247,19 @@ homelab/
 │   └── clusterconfig/
 │
 ├── kubernetes/                      # Helm values and configs (applied manually)
-│   └── monitoring/
-│       ├── kube-prometheus-stack-values.yaml
-│       ├── loki-stack-values.yaml
-│       └── loki-datasource.yaml
+│   ├── monitoring/
+│   │   ├── kube-prometheus-stack-values.yaml
+│   │   ├── loki-stack-values.yaml
+│   │   └── loki-datasource.yaml
+│   └── storage/
+│       ├── local-path-storage.yaml  # CSI driver manifest (namespace, RBAC, StorageClass)
+│       └── test-pvc.yaml            # Persistence validation test
 │
 └── gitops/                          # Phase 5+ — Everything deployed by ArgoCD
     ├── apps/                        # ArgoCD Application definitions (App of Apps)
     │   ├── nginx.yaml
-    │   └── kyverno-policies.yaml
+    │   ├── kyverno-policies.yaml
+    │   └── podinfo.yaml
     └── manifests/                   # Kubernetes manifests (source of truth)
         ├── nginx/
         │   ├── namespace.yaml
@@ -201,13 +268,25 @@ homelab/
         │   ├── serviceaccount.yaml
         │   ├── sealedsecret.yaml
         │   └── networkpolicy.yaml
-        └── kyverno-policies/
-            ├── disallow-latest-tag.yaml
-            ├── require-run-as-nonroot.yaml
-            ├── require-resource-limits.yaml
-            ├── require-drop-all-capabilities.yaml
-            ├── require-labels.yaml
-            └── verify-image-signature.yaml
+        ├── kyverno-policies/
+        │   ├── disallow-latest-tag.yaml
+        │   ├── require-run-as-nonroot.yaml
+        │   ├── require-resource-limits.yaml
+        │   ├── require-drop-all-capabilities.yaml
+        │   ├── require-labels.yaml
+        │   └── verify-image-signature.yaml
+        └── podinfo/
+            ├── namespace.yaml
+            ├── serviceaccount-podinfo.yaml
+            ├── serviceaccount-redis.yaml
+            ├── deployment-podinfo.yaml    # Distroless, 2 replicas, digest pinned
+            ├── deployment-redis.yaml      # Alpine + Vault Agent sidecar (2/2)
+            ├── service-podinfo.yaml       # LoadBalancer port 9898
+            ├── service-redis.yaml         # ClusterIP port 6379 (internal only)
+            ├── networkpolicy-podinfo.yaml
+            ├── networkpolicy-redis.yaml
+            ├── sealedsecret-redis-url.yaml
+            └── servicemonitor.yaml        # Prometheus ServiceMonitor
 ```
 
 ---
@@ -229,6 +308,9 @@ homelab/
 - [x] **Phase 7a** — Observability: Prometheus + Grafana (20+ dashboards), Loki + Promtail
 - [x] **Phase 7b** — Network segmentation: Cilium NetworkPolicies + attack scenario validation
 - [x] **Phase J2-1** — Chaos engineering: self-heal, node failure resilience, Hubble network audit
+- [x] **Phase J2-2** — CI/CD pipeline: GitHub Actions with Checkov + Trivy (path-filtered, parallel jobs)
+- [x] **Phase J2-3** — Microservices: Podinfo + Redis with dual secret delivery (Vault + SealedSecrets), NetworkPolicies, ServiceMonitor
+- [x] **Phase J2-4** — Persistent storage: local-path-provisioner CSI driver, PVCs for Prometheus (10Gi), Grafana (1Gi), Loki (5Gi)
 
 ---
 
@@ -258,13 +340,16 @@ helm install cilium cilium/cilium --namespace kube-system [...]
 helm install metallb metallb/metallb --namespace metallb-system --create-namespace \
   --set speaker.frr.enabled=false
 
-# 4. Install GitOps (ArgoCD syncs everything else from Git)
+# 4. Install persistent storage (before monitoring stack)
+kubectl apply -f kubernetes/storage/local-path-storage.yaml
+
+# 5. Install GitOps (ArgoCD syncs everything else from Git)
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
   --server-side --force-conflicts
 argocd app create root --repo https://github.com/abdelhaouari/homelab.git \
   --path gitops/apps --sync-policy automated --auto-prune --self-heal
 
-# 5. Install security stack
+# 6. Install security stack
 helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace
 helm install vault hashicorp/vault --namespace vault --create-namespace \
   --set server.dev.enabled=true --set injector.enabled=true
@@ -272,7 +357,7 @@ helm install falco falcosecurity/falco --namespace falco --create-namespace \
   --set driver.kind=modern_ebpf --set falcosidekick.enabled=true \
   --set falcosidekick.webui.enabled=false
 
-# 6. Install observability
+# 7. Install observability
 helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace monitoring --values kubernetes/monitoring/kube-prometheus-stack-values.yaml
 helm install loki-stack grafana/loki-stack \
@@ -299,13 +384,14 @@ All application deployments flow through Git:
 
 ```
 Developer commits to main
-  → ArgoCD detects change (polling or webhook)
-    → Manifests are applied to the cluster
-      → Kyverno validates at admission (blocks non-compliant resources)
-        → Vault Agent injects secrets into pods
-          → Falco monitors runtime behavior
-            → Prometheus scrapes metrics, Promtail collects logs
-              → Grafana displays dashboards and alerts
+  → GitHub Actions runs Checkov + Trivy (shift-left gate)
+    → ArgoCD detects change (polling or webhook)
+      → Manifests are applied to the cluster
+        → Kyverno validates at admission (blocks non-compliant resources)
+          → Vault Agent injects secrets into pods
+            → Falco monitors runtime behavior
+              → Prometheus scrapes metrics, Promtail collects logs
+                → Grafana displays dashboards and alerts
 ```
 
 To deploy a new application:
@@ -356,3 +442,5 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Falco | Runtime threat detection (modern eBPF) | Deployed |
 | Prometheus + Grafana | Metrics + dashboards | Deployed |
 | Loki + Promtail | Log aggregation | Deployed |
+| GitHub Actions | CI/CD security pipeline | Deployed |
+| local-path-provisioner | CSI driver / persistent storage | Deployed |

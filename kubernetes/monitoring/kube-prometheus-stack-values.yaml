@@ -49,13 +49,9 @@ grafana:
 # -- Alertmanager --
 alertmanager:
   alertmanagerSpec:
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 1Gi
+    # No PVC — Alertmanager only stores silences/notifications
+    # Will add persistent storage when receivers (Slack, email) are configured
+    storageSpec: {}
 # -- Node Exporter --
 # Runs as DaemonSet — exposes host-level metrics (CPU, RAM, disk, network)
 nodeExporter:
