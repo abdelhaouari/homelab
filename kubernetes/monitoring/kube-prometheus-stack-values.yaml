@@ -1,17 +1,33 @@
 # kube-prometheus-stack Helm values
 # Tailored for Talos Linux + Cilium (no kube-proxy)
-
 # -- Prometheus --
 prometheus:
   prometheusSpec:
-    # No PV provisioner on Talos — use emptyDir (data lost on restart)
-    storageSpec: {}
+    # Persistent storage — metrics survive pod restarts
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    # Fix permissions on PV subPath (fsGroup doesn't apply to subPath mounts)
+    initContainers:
+      - name: fix-permissions
+        image: busybox:1.37
+        command: ["sh", "-c", "chown -R 1000:2000 /prometheus"]
+        securityContext:
+          runAsUser: 0
+          runAsNonRoot: false
+        volumeMounts:
+          - name: prometheus-kube-prometheus-stack-prometheus-db
+            mountPath: /prometheus
+            subPath: prometheus-db
     # Scrape all ServiceMonitors across all namespaces
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     # Retention — 7 days is enough for a lab
     retention: 7d
-
 # -- Grafana --
 grafana:
   # Expose via MetalLB (next free IP in 10.10.20.100-150 range)
@@ -20,28 +36,34 @@ grafana:
   # Default admin credentials (change password after first login)
   adminUser: admin
   adminPassword: "changeme-grafana-2026"
+  # Persistent storage — preferences and state survive pod restarts
+  persistence:
+    enabled: true
+    size: 1Gi
   # Sidecar auto-discovers ConfigMap dashboards and datasources
   sidecar:
     dashboards:
       enabled: true
     datasources:
       enabled: true
-
 # -- Alertmanager --
 alertmanager:
   alertmanagerSpec:
-    storageSpec: {}
-
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
 # -- Node Exporter --
 # Runs as DaemonSet — exposes host-level metrics (CPU, RAM, disk, network)
 nodeExporter:
   enabled: true
-
 # -- Kube State Metrics --
 # Exposes Kubernetes object metrics (deployments, pods, nodes status)
 kubeStateMetrics:
   enabled: true
-
 # -- Disable ServiceMonitors for components that don't exist on Talos --
 # kube-proxy is replaced by Cilium
 kubeProxy:

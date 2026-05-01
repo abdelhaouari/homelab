@@ -4,7 +4,8 @@
 loki:
   # Single-instance mode (no clustering needed for a lab)
   persistence:
-    enabled: false # emptyDir — logs lost on restart, acceptable for lab
+    enabled: true
+    size: 5Gi
   # Keep logs for 3 days
   config:
     limits_config:
