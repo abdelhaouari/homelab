@@ -31,6 +31,7 @@ spec:
                 - monitoring
                 - argocd
                 - local-path-storage
+                - harbor
       validate:
         message: "CPU and memory limits are required for all containers."
         pattern:

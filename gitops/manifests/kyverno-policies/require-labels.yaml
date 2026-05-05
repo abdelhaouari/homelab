@@ -31,6 +31,7 @@ spec:
                 - falco
                 - monitoring
                 - local-path-storage
+                - harbor
       validate:
         message: "The label 'app' is required on all pods."
         pattern:

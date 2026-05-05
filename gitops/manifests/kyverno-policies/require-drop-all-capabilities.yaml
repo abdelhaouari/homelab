@@ -31,6 +31,7 @@ spec:
                 - monitoring
                 - argocd
                 - local-path-storage
+                - harbor
       validate:
         message: "Containers must drop ALL capabilities."
         deny:
