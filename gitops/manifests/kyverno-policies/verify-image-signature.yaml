@@ -7,9 +7,9 @@ metadata:
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      Images from the internal Harbor registry (10.10.20.105/homelab/*)
-      must be signed with Cosign keyless via GitHub OIDC.
-      Unsigned images are rejected at admission.
+      Images from the internal Harbor registry must be signed
+      with Cosign using the homelab signing key.
+      Unsigned or tampered images are rejected at admission.
 spec:
   validationFailureAction: Enforce
   webhookTimeoutSeconds: 30
@@ -29,10 +29,9 @@ spec:
               - harbor-registry-creds
           attestors:
             - entries:
-                - keyless:
-                    subject: "*abdelhaouari*"
-                    issuer: "https://github.com/login/oauth"
-                    rekor:
-                      url: https://rekor.sigstore.dev
-                    ctlog:
-                      ignoreSCT: true
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFcxXjjPycVFSB0bf3up+GfU+NMNN
+                      XGLu9dWnt2PZDkfhXQfYoc53/cLmxCVMrK0fyLVEZYRuTegJa+phw1yaVA==
+                      -----END PUBLIC KEY-----
