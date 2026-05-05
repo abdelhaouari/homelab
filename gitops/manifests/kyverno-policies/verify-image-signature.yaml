@@ -23,7 +23,7 @@ spec:
                 - Pod
       verifyImages:
         - imageReferences:
-            - "10.10.20.105/homelab/*"
+            - "harbor.homelab.local/homelab/*"
           attestors:
             - entries:
                 - keyless:
