@@ -24,6 +24,9 @@ spec:
       verifyImages:
         - imageReferences:
             - "harbor.homelab.local/homelab/*"
+          imageRegistryCredentials:
+            secrets:
+              - harbor-registry-creds
           attestors:
             - entries:
                 - keyless:
