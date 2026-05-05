@@ -63,8 +63,9 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 | 10.10.20.102   | Grafana     | Metrics and log dashboards     |
 | 10.10.20.103   | Hubble UI   | Network flow observability     |
 | 10.10.20.104   | Podinfo     | Multi-tier microservices app   |
+| 10.10.20.105   | Harbor      | Private container registry     |
 
-> IPs are dynamically assigned by MetalLB. After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
+> IPs are dynamically assigned by MetalLB (except Harbor, pinned via annotation). After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
 
 ---
 
@@ -79,15 +80,16 @@ This lab implements defense in depth across 6 security domains, using tools that
 | Packer            | Reproducible, hardened golden images       | 1     |
 | Trivy             | Container image CVE scanning + IaC misconfigs | 5b |
 | Checkov           | IaC security scanning (CIS benchmarks)    | 5b    |
-| Cosign (Sigstore) | Keyless image signing via OIDC + Fulcio/Rekor | 5c |
+| Cosign (Sigstore) | Key-based image signing, verified at admission | 5c, J2-5 |
 | SBOM (SPDX 2.3)   | Software Bill of Materials attached to images | 5c |
 | GitHub Actions     | CI pipeline: Checkov + Trivy on every push/PR | J2-2 |
+| Harbor             | Private container registry with OCI signature support | J2-5 |
 
 ### Runtime Security
 
 | Tool    | Purpose                                           | Phase |
 |---------|---------------------------------------------------|-------|
-| Kyverno | Kubernetes admission controller — 6 ClusterPolicies enforced | 6a |
+| Kyverno | Kubernetes admission controller — 6 ClusterPolicies enforced (including image signature verification) | 6a, J2-5 |
 | Vault   | Secrets injection via sidecar (Kubernetes auth, KV v2) | 6b |
 | Falco   | Modern eBPF runtime threat detection (MITRE ATT&CK mapped) | 6c |
 | Cilium NetworkPolicy | Pod-level ingress/egress firewall (deny-by-default) | 7b |
@@ -112,7 +114,7 @@ The deployment was hardened iteratively using Trivy and Checkov, reducing findin
 | Drop all capabilities | `capabilities.drop: ["ALL"]` | Kyverno (`require-drop-all-capabilities`) |
 | Resource limits | CPU and memory requests/limits | Kyverno (`require-resource-limits`) |
 | No latest tag | Digest pinning (`image@sha256:...`) | Kyverno (`disallow-latest-tag`) |
-| Image signing | Cosign keyless via Sigstore OIDC | Kyverno (`verify-image-signature`, audit) |
+| Image signing | Cosign key-based signing, verified at admission | Kyverno (`verify-image-signature`, **enforce**) |
 | Network segmentation | NetworkPolicy: egress DNS + Vault only | Cilium |
 | Secrets injection | Vault Agent sidecar, app never handles secrets | Vault + Kubernetes auth |
 | Runtime detection | Shell-in-container detected in real time | Falco (T1059 MITRE ATT&CK) |
@@ -202,7 +204,7 @@ Namespace: podinfo
 └── Cache validated end-to-end: POST /cache/key → GET /cache/key
 ```
 
-**Dual secret delivery** — the same Redis password lives in Vault (single source of truth) but is delivered through two different mechanisms depending on the image runtime: Vault Agent sidecar writes files for Alpine images (Redis), while SealedSecrets deliver env vars for distroless images (Podinfo) that have no shell to read files. In production, the Vault Secrets Operator (VSO) would synchronize Vault to Kubernetes Secrets automatically.
+**Dual secret delivery** — the same Redis password lives in Vault (single source of truth) but is delivered through two different mechanisms depending on the image runtime: Vault Agent sidecar writes files for Alpine images (Redis), while SealedSecrets deliver env vars for distroless images (Podinfo) that have no shell to read files.
 
 All containers pass the 6 Kyverno policies. Both images use digest pinning (no mutable tags).
 
@@ -219,6 +221,24 @@ Stateful workloads (Prometheus, Grafana, Loki) previously used `emptyDir` — da
 | Loki | Bound | 5 Gi | Log index and chunks (72h retention) |
 
 StorageClass `local-path` is marked as default with `WaitForFirstConsumer` binding. Data is node-local (SPOF) — acceptable trade-off for a homelab, documented.
+
+---
+
+## Harbor — Private Container Registry
+
+Harbor provides a private, enterprise-grade container registry inside the cluster, replacing ghcr.io for image hosting. This resolved the last remaining security gap: Kyverno's `verify-image-signature` policy upgraded from **Audit** to **Enforce**.
+
+```
+Supply chain flow:
+  Docker push → Harbor (private registry, self-signed TLS)
+    → Cosign sign --key (key-based signature stored as OCI artifact)
+      → Kyverno verify at admission (public key in policy, Enforce mode)
+        → kubelet pull (Talos nodes trust Harbor CA via machine config)
+```
+
+**PKI trust distribution** — Harbor uses a self-signed CA certificate distributed to 4 trust boundaries: WSL system trust store, Windows certificate store (Docker Desktop), Talos machine config (containerd), and CoreDNS (cluster-internal hostname resolution via `harbor.homelab.local`).
+
+**Key-based signing over keyless** — Cosign key-based signing was chosen over keyless (Sigstore OIDC) for the internal registry. Keyless depends on Fulcio/Rekor external services for verification; key-based verification is local and instantaneous using the public key embedded directly in the Kyverno policy. Keyless remains ideal for public CI/CD pipelines (GitHub Actions).
 
 ---
 
@@ -251,9 +271,14 @@ homelab/
 │   │   ├── kube-prometheus-stack-values.yaml
 │   │   ├── loki-stack-values.yaml
 │   │   └── loki-datasource.yaml
-│   └── storage/
-│       ├── local-path-storage.yaml  # CSI driver manifest (namespace, RBAC, StorageClass)
-│       └── test-pvc.yaml            # Persistence validation test
+│   ├── storage/
+│   │   ├── local-path-storage.yaml  # CSI driver manifest
+│   │   └── test-pvc.yaml
+│   └── harbor/
+│       ├── harbor-values.yaml       # Helm values (resources, PVCs, TLS, MetalLB)
+│       └── tls/                     # Self-signed CA + Harbor certificate
+│
+├── cosign.pub                       # Cosign public key for image verification
 │
 └── gitops/                          # Phase 5+ — Everything deployed by ArgoCD
     ├── apps/                        # ArgoCD Application definitions (App of Apps)
@@ -263,7 +288,7 @@ homelab/
     └── manifests/                   # Kubernetes manifests (source of truth)
         ├── nginx/
         │   ├── namespace.yaml
-        │   ├── deployment.yaml      # Fully hardened (see Security Controls)
+        │   ├── deployment.yaml      # Image from Harbor, signature verified by Kyverno
         │   ├── service.yaml
         │   ├── serviceaccount.yaml
         │   ├── sealedsecret.yaml
@@ -274,19 +299,19 @@ homelab/
         │   ├── require-resource-limits.yaml
         │   ├── require-drop-all-capabilities.yaml
         │   ├── require-labels.yaml
-        │   └── verify-image-signature.yaml
+        │   └── verify-image-signature.yaml  # Enforce mode — key-based Cosign verification
         └── podinfo/
             ├── namespace.yaml
             ├── serviceaccount-podinfo.yaml
             ├── serviceaccount-redis.yaml
-            ├── deployment-podinfo.yaml    # Distroless, 2 replicas, digest pinned
-            ├── deployment-redis.yaml      # Alpine + Vault Agent sidecar (2/2)
-            ├── service-podinfo.yaml       # LoadBalancer port 9898
-            ├── service-redis.yaml         # ClusterIP port 6379 (internal only)
+            ├── deployment-podinfo.yaml
+            ├── deployment-redis.yaml
+            ├── service-podinfo.yaml
+            ├── service-redis.yaml
             ├── networkpolicy-podinfo.yaml
             ├── networkpolicy-redis.yaml
             ├── sealedsecret-redis-url.yaml
-            └── servicemonitor.yaml        # Prometheus ServiceMonitor
+            └── servicemonitor.yaml
 ```
 
 ---
@@ -302,7 +327,7 @@ homelab/
 - [x] **Phase 5a** — GitOps: ArgoCD (App of Apps, self-heal), Sealed Secrets
 - [x] **Phase 5b** — Shift-left security: Trivy (CVE + misconfig), Checkov (CIS benchmarks)
 - [x] **Phase 5c** — Supply chain: Cosign keyless signing (Sigstore/Fulcio/Rekor), SBOM (SPDX 2.3)
-- [x] **Phase 6a** — Policy enforcement: Kyverno (6 ClusterPolicies, 5 Enforce + 1 Audit)
+- [x] **Phase 6a** — Policy enforcement: Kyverno (6 ClusterPolicies, all Enforce including image signature)
 - [x] **Phase 6b** — Secrets management: HashiCorp Vault (KV v2, Kubernetes auth, sidecar injection)
 - [x] **Phase 6c** — Runtime security: Falco (modern eBPF, MITRE ATT&CK mapped, Falcosidekick)
 - [x] **Phase 7a** — Observability: Prometheus + Grafana (20+ dashboards), Loki + Promtail
@@ -311,6 +336,7 @@ homelab/
 - [x] **Phase J2-2** — CI/CD pipeline: GitHub Actions with Checkov + Trivy (path-filtered, parallel jobs)
 - [x] **Phase J2-3** — Microservices: Podinfo + Redis with dual secret delivery (Vault + SealedSecrets), NetworkPolicies, ServiceMonitor
 - [x] **Phase J2-4** — Persistent storage: local-path-provisioner CSI driver, PVCs for Prometheus (10Gi), Grafana (1Gi), Loki (5Gi)
+- [x] **Phase J2-5** — Harbor private registry: Cosign key-based signing, Kyverno image verification upgraded from Audit to Enforce, self-signed PKI
 
 ---
 
@@ -350,14 +376,19 @@ argocd app create root --repo https://github.com/abdelhaouari/homelab.git \
   --path gitops/apps --sync-policy automated --auto-prune --self-heal
 
 # 6. Install security stack
-helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace
+helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace \
+  --set "features.registryClient.allowInsecure=true"
 helm install vault hashicorp/vault --namespace vault --create-namespace \
   --set server.dev.enabled=true --set injector.enabled=true
 helm install falco falcosecurity/falco --namespace falco --create-namespace \
   --set driver.kind=modern_ebpf --set falcosidekick.enabled=true \
   --set falcosidekick.webui.enabled=false
 
-# 7. Install observability
+# 7. Install Harbor (private container registry)
+helm install harbor harbor/harbor --namespace harbor \
+  --values kubernetes/harbor/harbor-values.yaml --version 1.16.2
+
+# 8. Install observability
 helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace monitoring --values kubernetes/monitoring/kube-prometheus-stack-values.yaml
 helm install loki-stack grafana/loki-stack \
@@ -387,7 +418,7 @@ Developer commits to main
   → GitHub Actions runs Checkov + Trivy (shift-left gate)
     → ArgoCD detects change (polling or webhook)
       → Manifests are applied to the cluster
-        → Kyverno validates at admission (blocks non-compliant resources)
+        → Kyverno validates at admission (blocks non-compliant or unsigned images)
           → Vault Agent injects secrets into pods
             → Falco monitors runtime behavior
               → Prometheus scrapes metrics, Promtail collects logs
@@ -413,7 +444,7 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Network segmentation | VLANs (OPNsense), Cilium NetworkPolicies (deny-by-default egress) |
 | Defense in depth | Perimeter FW → VLAN isolation → PodSecurity → Kyverno admission → NetworkPolicy → Falco runtime |
 | Shift-left security | Trivy + Checkov scan manifests and images before deployment |
-| Supply chain security | Cosign keyless signing, SBOM generation, digest pinning (no mutable tags) |
+| Supply chain security | Cosign key-based signing, Harbor private registry, digest pinning (no mutable tags) |
 | GitOps | Git is the single source of truth; drift is auto-corrected |
 | Audit trail | Git commit history, Kubernetes audit logs, Falco alerts in Loki/Grafana |
 | Reproducibility | Full destroy and rebuild from code |
@@ -444,3 +475,4 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Loki + Promtail | Log aggregation | Deployed |
 | GitHub Actions | CI/CD security pipeline | Deployed |
 | local-path-provisioner | CSI driver / persistent storage | Deployed |
+| Harbor | Private container registry | Deployed |
