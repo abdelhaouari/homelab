@@ -7,15 +7,15 @@ metadata:
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      Images from ghcr.io/abdelhaouari must be signed with Cosign
-      using keyless signing via GitHub OIDC. Policy set to Audit
-      due to GHCR OCI Referrers API limitation with Kyverno.
+      Images from the internal Harbor registry (10.10.20.105/homelab/*)
+      must be signed with Cosign keyless via GitHub OIDC.
+      Unsigned images are rejected at admission.
 spec:
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   webhookTimeoutSeconds: 30
   background: false
   rules:
-    - name: verify-cosign-signature
+    - name: verify-harbor-cosign-signature
       match:
         any:
           - resources:
@@ -23,12 +23,7 @@ spec:
                 - Pod
       verifyImages:
         - imageReferences:
-            - "ghcr.io/abdelhaouari/*"
-          mutateDigest: false
-          verifyDigest: false
-          imageRegistryCredentials:
-            secrets:
-              - ghcr-secret
+            - "10.10.20.105/homelab/*"
           attestors:
             - entries:
                 - keyless:
@@ -36,3 +31,5 @@ spec:
                     issuer: "https://github.com/login/oauth"
                     rekor:
                       url: https://rekor.sigstore.dev
+                    ctlog:
+                      ignoreSCT: true

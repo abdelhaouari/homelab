@@ -48,3 +48,6 @@ talos/clusterconfig/kubeconfig
 
 # Sealed Secrets private key backup (NEVER commit)
 sealed-secrets-key-backup.yaml
+kubernetes/harbor/tls/*.key
+kubernetes/harbor/tls/*.csr
+kubernetes/harbor/tls/*.srl

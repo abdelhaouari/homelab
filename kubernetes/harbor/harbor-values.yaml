@@ -1,0 +1,121 @@
+# =============================================================================
+# Harbor Registry — Helm Values (homelab-sized)
+# Chart: goharbor/harbor
+# =============================================================================
+
+# --- Expose via MetalLB LoadBalancer ---
+expose:
+  type: loadBalancer
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls
+  loadBalancer:
+    name: harbor
+    annotations:
+      # Pin to a specific IP from the MetalLB pool
+      metallb.universe.tf/loadBalancerIPs: "10.10.20.105"
+
+# External URL — how clients (Docker, Cosign, Kyverno) reach Harbor
+# Must match the TLS certificate SAN
+externalURL: https://10.10.20.105
+
+# --- Persistent storage — all PVCs use local-path (Talos writable path) ---
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      storageClass: local-path
+      size: 10Gi
+    database:
+      storageClass: local-path
+      size: 1Gi
+    redis:
+      storageClass: local-path
+      size: 1Gi
+    jobservice:
+      jobLog:
+        storageClass: local-path
+        size: 1Gi
+
+# --- Internal PostgreSQL (included in chart) ---
+database:
+  type: internal
+  internal:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# --- Internal Redis (included in chart) ---
+redis:
+  type: internal
+  internal:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# --- Core (API + main logic) ---
+core:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# --- Portal (web UI) ---
+portal:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# --- Registry (image storage engine) ---
+registry:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# --- Job Service (async tasks: replication, scan, GC) ---
+jobservice:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# --- Trivy scanner: DISABLED ---
+# We already have Trivy v0.69.3 on WSL for shift-left scanning.
+# Disabling saves ~512Mi RAM and avoids a duplicate vulnerability DB.
+trivy:
+  enabled: false
+
+# --- Notary: DISABLED ---
+# Deprecated by Docker. We use Cosign/Sigstore for image signing.
+notary:
+  enabled: false
+
+# --- Metrics for Prometheus ---
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
