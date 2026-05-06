@@ -33,6 +33,7 @@ spec:
                 - local-path-storage
                 - harbor
                 - cert-manager
+                - ingress-system
       validate:
         message: "Containers must set securityContext.runAsNonRoot to true."
         pattern:

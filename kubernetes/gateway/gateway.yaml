@@ -1,0 +1,69 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: homelab-gateway
+  namespace: ingress-system
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-nginx
+      protocol: HTTPS
+      port: 443
+      hostname: nginx.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: nginx-tls
+    - name: https-grafana
+      protocol: HTTPS
+      port: 443
+      hostname: grafana.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: grafana-tls
+    - name: https-argocd
+      protocol: HTTPS
+      port: 443
+      hostname: argocd.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: argocd-tls
+    - name: https-hubble
+      protocol: HTTPS
+      port: 443
+      hostname: hubble.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: hubble-tls
+    - name: https-podinfo
+      protocol: HTTPS
+      port: 443
+      hostname: podinfo.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: podinfo-tls

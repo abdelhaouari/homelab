@@ -33,6 +33,7 @@ spec:
                 - local-path-storage
                 - harbor
                 - cert-manager
+                - ingress-system
       validate:
         message: "The label 'app' is required on all pods."
         pattern:

@@ -1,0 +1,29 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: mutate-gateway-endpointslice
+  annotations:
+    policies.kyverno.io/title: Add service-name label to Cilium Gateway EndpointSlices
+    policies.kyverno.io/description: >-
+      Cilium Gateway API omits the kubernetes.io/service-name label on
+      EndpointSlices it creates for Gateway resources. MetalLB requires
+      this label to announce the LoadBalancer IP via ARP. This policy
+      automatically injects the missing label at creation time.
+    policies.kyverno.io/severity: high
+spec:
+  rules:
+    - name: add-service-name-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - EndpointSlice
+              selector:
+                matchExpressions:
+                  - key: io.cilium.gateway/owning-gateway
+                    operator: Exists
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              kubernetes.io/service-name: "{{request.object.metadata.name}}"
