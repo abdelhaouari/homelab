@@ -32,6 +32,7 @@ spec:
                 - argocd
                 - local-path-storage
                 - harbor
+                - cert-manager
       validate:
         message: "Containers must drop ALL capabilities."
         deny:

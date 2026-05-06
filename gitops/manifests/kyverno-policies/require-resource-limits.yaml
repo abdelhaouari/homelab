@@ -32,6 +32,7 @@ spec:
                 - argocd
                 - local-path-storage
                 - harbor
+                - cert-manager
       validate:
         message: "CPU and memory limits are required for all containers."
         pattern:
