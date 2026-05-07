@@ -9,7 +9,7 @@ spec:
       namespace: ingress-system
       sectionName: https-rexpn
   hostnames:
-    - rexpn.homelab.local
+    - rexpn.ahaouari.com
   rules:
     - matches:
         - path:
