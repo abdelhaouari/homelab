@@ -28,6 +28,14 @@ spec:
           image: harbor.homelab.local/homelab/rexpn-app@sha256:71d51dc8a669cba98d51e3d758cceb4b5eb9cc3456f29f58447c6cc16b662c7a
           ports:
             - containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 10m
