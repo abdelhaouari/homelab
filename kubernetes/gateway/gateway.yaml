@@ -67,3 +67,14 @@ spec:
         mode: Terminate
         certificateRefs:
           - name: podinfo-tls
+    - name: https-rexpn
+      protocol: HTTPS
+      port: 443
+      hostname: rexpn.homelab.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: rexpn-tls
