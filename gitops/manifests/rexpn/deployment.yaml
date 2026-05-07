@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: harbor.homelab.local/homelab/rexpn-app@sha256:71d51dc8a669cba98d51e3d758cceb4b5eb9cc3456f29f58447c6cc16b662c7a
+          image: harbor.homelab.local/homelab/rexpn-app@sha256:1a9ba702753d6ae340da01228ec02b878b8075de4738593e0aad21e9b253299a
           ports:
             - containerPort: 8080
           resources:
