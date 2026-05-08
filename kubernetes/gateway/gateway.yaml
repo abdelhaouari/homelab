@@ -70,11 +70,11 @@ spec:
     - name: https-rexpn
       protocol: HTTPS
       port: 443
-      hostname: rexpn.homelab.local
+      hostname: rexpn.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: rexpn-tls
+          - name: rexpn-ahaouari-tls
