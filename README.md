@@ -9,14 +9,15 @@ Production-style home lab implementing a complete DevSecOps pipeline on bare-met
 ```
 Terraform (Talos VMs)
   → talosctl (K8s bootstrap)
-    → Cilium (eBPF networking + NetworkPolicies)
+    → Cilium (eBPF networking + Gateway API + NetworkPolicies)
       → ArgoCD (GitOps, single source of truth)
         → Trivy + Checkov (shift-left scanning)
           → Cosign (image signing + SBOM)
-            → Kyverno (admission control)
+            → Kyverno (admission control + mutate policies)
               → Vault (secrets injection)
                 → Falco (runtime threat detection)
-                  → Prometheus + Grafana + Loki (observability)
+                  → cert-manager + Let's Encrypt (automated TLS)
+                    → Prometheus + Grafana + Loki (observability)
 
 Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline hardening)
   → reusable for non-K8s VMs (monitoring, SIEM, jump hosts)
@@ -27,13 +28,17 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 ## Architecture
 
 | Component     | Details                                            |
-|---------------|----------------------------------------------------|
+|---------------|---------------------------------------------------|
 | Hypervisor    | Proxmox VE 9.1.6, ZFS RAIDZ-1 (~916 GB)          |
 | Firewall      | OPNsense 26.1 (virtualized, router-on-a-stick)    |
-| Kubernetes    | Talos Linux v1.12.6 — 4-node cluster (1 ctrl + 3 workers, K8s v1.35.2)|
+| Kubernetes    | Talos Linux v1.12.6 — 4-node cluster (1 ctrl + 3 workers, K8s v1.35.2) |
 | CNI           | Cilium (eBPF) replacing Flannel + kube-proxy       |
+| Ingress       | Cilium Gateway API (L7 routing, single entry point) |
+| TLS           | cert-manager with Let's Encrypt (DNS-01) + private CA |
 | GitOps        | ArgoCD v3.3.6 (App of Apps pattern)                |
 | Monitoring    | Prometheus + Grafana + Loki                        |
+| VPN           | WireGuard (built-in OPNsense 26) + Cloudflare DDNS |
+| Domain        | `ahaouari.com` (Cloudflare, DNS-01 challenges)    |
 | Control Plane | Windows 11 + WSL Ubuntu                           |
 
 ### Network Segmentation (VLANs via OPNsense)
@@ -44,6 +49,7 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 | Kubernetes  | 20   | 10.10.20.0/24  | K8s control plane and workers |
 | Storage     | 30   | 10.10.30.0/24  | Persistent storage backends   |
 | Lab / DMZ   | 40   | 10.10.40.0/24  | Isolated security lab         |
+| WireGuard   | —    | 10.10.50.0/24  | Remote VPN access (tunnel, not a VLAN) |
 
 ### Kubernetes Cluster
 
@@ -54,18 +60,27 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 | talos-work-02 | 10.10.20.12 | Worker (6 GB) | Talos Linux (immutable)   |
 | talos-work-03 | 10.10.20.13 | Worker (6 GB) | Talos Linux (immutable)   |
 
-### Exposed Services (MetalLB L2/ARP, FRR disabled)
+### Exposed Services (MetalLB L2/ARP + Cilium Gateway API)
 
-| IP             | Service     | Purpose                        |
-|----------------|-------------|--------------------------------|
-| 10.10.20.100   | ArgoCD UI   | GitOps dashboard               |
-| 10.10.20.101   | nginx-test  | Hardened test application       |
-| 10.10.20.102   | Grafana     | Metrics and log dashboards     |
-| 10.10.20.103   | Hubble UI   | Network flow observability     |
-| 10.10.20.104   | Podinfo     | Multi-tier microservices app   |
-| 10.10.20.105   | Harbor      | Private container registry     |
+| IP             | Service         | Access method                          |
+|----------------|-----------------|----------------------------------------|
+| 10.10.20.100   | ArgoCD UI       | Direct LoadBalancer (stability)        |
+| 10.10.20.103   | Cilium Gateway  | Single L7 entry point for all HTTPRoutes |
+| 10.10.20.105   | Harbor          | Direct LoadBalancer (pinned annotation) |
 
-> IPs are dynamically assigned by MetalLB (except Harbor, pinned via annotation). After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
+Services behind the Cilium Gateway are accessed by hostname, with TLS terminated by Envoy:
+
+| Hostname                  | Backend          | TLS certificate       |
+|---------------------------|------------------|-----------------------|
+| `nginx.homelab.local`     | nginx-test       | Private CA (cert-manager) |
+| `grafana.homelab.local`   | Grafana          | Private CA (cert-manager) |
+| `hubble.homelab.local`    | Hubble UI        | Private CA (cert-manager) |
+| `podinfo.homelab.local`   | Podinfo          | Private CA (cert-manager) |
+| `rexpn.ahaouari.com`      | REXPN            | Let's Encrypt (public) |
+
+> All `*.homelab.local` hostnames resolve to internal IPs via OPNsense Unbound DNS overrides (split-horizon). These services are not exposed to the internet — accessible only from the local network or via WireGuard VPN. HTTP requests are automatically redirected to HTTPS (301).
+
+> MetalLB IPs are dynamically assigned (except Harbor, pinned via annotation). After a rebuild, verify with `kubectl get svc -A | grep LoadBalancer`.
 
 ---
 
@@ -89,10 +104,20 @@ This lab implements defense in depth across 6 security domains, using tools that
 
 | Tool    | Purpose                                           | Phase |
 |---------|---------------------------------------------------|-------|
-| Kyverno | Kubernetes admission controller — 6 ClusterPolicies enforced (including image signature verification) | 6a, J2-5 |
+| Kyverno | Kubernetes admission controller — 7 ClusterPolicies (6 validate + 1 mutate), all Enforce | 6a, J2-5, Axe 3 |
 | Vault   | Secrets injection via sidecar (Kubernetes auth, KV v2) | 6b |
 | Falco   | Modern eBPF runtime threat detection (MITRE ATT&CK mapped) | 6c |
 | Cilium NetworkPolicy | Pod-level ingress/egress firewall (deny-by-default) | 7b |
+
+### Networking & Ingress
+
+| Tool               | Purpose                                          | Phase  |
+|--------------------|--------------------------------------------------|--------|
+| Cilium Gateway API | L7 ingress controller (HTTPRoutes, TLS termination) | Axe 3 |
+| cert-manager       | Automated TLS certificates (private CA + Let's Encrypt) | Axe 3, Axe 5 |
+| Let's Encrypt      | Public TLS certificates via DNS-01 / Cloudflare  | Axe 5  |
+| WireGuard          | Remote VPN access (built-in OPNsense 26)          | Axe 4  |
+| Cloudflare DDNS    | Dynamic DNS for VPN endpoint (`vpn.ahaouari.com`) | Axe 4  |
 
 ### Observability
 
@@ -118,6 +143,56 @@ The deployment was hardened iteratively using Trivy and Checkov, reducing findin
 | Network segmentation | NetworkPolicy: egress DNS + Vault only | Cilium |
 | Secrets injection | Vault Agent sidecar, app never handles secrets | Vault + Kubernetes auth |
 | Runtime detection | Shell-in-container detected in real time | Falco (T1059 MITRE ATT&CK) |
+| TLS everywhere | Automated certificates via cert-manager | Let's Encrypt + private CA |
+
+---
+
+## Ingress — Cilium Gateway API + cert-manager
+
+All HTTP services are routed through a single Cilium Gateway (`10.10.20.103`) using Kubernetes Gateway API. This replaces individual LoadBalancer IPs per service with hostname-based L7 routing, TLS termination by Envoy, and automatic HTTP-to-HTTPS redirection.
+
+```
+Client (browser / curl / phone via VPN)
+  → DNS resolves hostname to 10.10.20.103 (Unbound override or /etc/hosts)
+    → Cilium Gateway (Envoy) terminates TLS
+      → HTTPRoute matches hostname → routes to backend Service
+```
+
+Two certificate issuers coexist in the cluster:
+
+| Issuer | Type | Use case |
+|--------|------|----------|
+| `homelab-ca-issuer` | Private CA (self-signed) | Internal services (`*.homelab.local`, Harbor) |
+| `letsencrypt-prod` | Let's Encrypt (DNS-01 via Cloudflare) | Public-facing services (`*.ahaouari.com`) |
+
+cert-manager automatically provisions and renews TLS certificates. Let's Encrypt certificates are validated via DNS-01 challenges — cert-manager creates a temporary TXT record in Cloudflare, Let's Encrypt verifies domain ownership, then cert-manager cleans up. No web server is exposed to the internet.
+
+**Kyverno mutate policy** — Cilium omits the `kubernetes.io/service-name` label on Gateway EndpointSlices, causing MetalLB to refuse ARP announcements. A Kyverno mutate policy (`mutate-gateway-endpointslice`) auto-injects the missing label, fixing the integration without manual intervention.
+
+---
+
+## Remote Access — WireGuard VPN + DDNS
+
+The entire homelab is accessible from anywhere (phone on LTE, external laptop) via a WireGuard VPN tunnel through OPNsense.
+
+```
+Phone / Laptop (external network)
+  → vpn.ahaouari.com:51820 (Cloudflare DDNS → public IP)
+    → Port forward (Fizz router UDP 51820 → OPNsense WAN)
+      → WireGuard tunnel (10.10.50.0/24)
+        → OPNsense routes to internal VLANs (10.10.x.0/24)
+          → Access ArgoCD, Grafana, Harbor, all services via VPN
+```
+
+| Component | Details |
+|-----------|---------|
+| VPN server | OPNsense 26 built-in WireGuard, port UDP 51820 |
+| Tunnel subnet | `10.10.50.0/24` (virtual, not a VLAN) |
+| DDNS | `vpn.ahaouari.com` updated by ddclient → Cloudflare API |
+| Split tunnel | Only `10.10.0.0/16` and `192.168.0.0/24` routed through VPN |
+| DNS via VPN | Clients use OPNsense Unbound (`10.10.20.1`) for internal resolution |
+
+Split tunneling ensures that only traffic destined for the homelab flows through the VPN — regular internet traffic goes directly through the client's network.
 
 ---
 
@@ -159,7 +234,7 @@ A worker node was stopped (hard power-off in Proxmox) to simulate hardware failu
 | MetalLB speaker crash loop | FRR/BGP enabled but unused (L2 mode) | Disabled FRR (`speaker.frr.enabled=false`) |
 | Grafana crash on restart | Duplicate Loki datasource with `isDefault: true` | Disabled auto-datasource in loki-stack chart |
 
-**Outcome**: Rebuilt cluster from scratch in ~30 minutes using the IaC runbook — 4 nodes, 59 pods, zero crashes.
+**Outcome**: Rebuilt cluster from scratch in ~30 minutes using the IaC runbook — 4 nodes, ~71 pods, zero crashes.
 
 ### Test 3: Network Segmentation Audit (Hubble)
 
@@ -206,7 +281,7 @@ Namespace: podinfo
 
 **Dual secret delivery** — the same Redis password lives in Vault (single source of truth) but is delivered through two different mechanisms depending on the image runtime: Vault Agent sidecar writes files for Alpine images (Redis), while SealedSecrets deliver env vars for distroless images (Podinfo) that have no shell to read files.
 
-All containers pass the 6 Kyverno policies. Both images use digest pinning (no mutable tags).
+All containers pass the 7 Kyverno policies. Both images use digest pinning (no mutable tags).
 
 ---
 
@@ -219,6 +294,10 @@ Stateful workloads (Prometheus, Grafana, Loki) previously used `emptyDir` — da
 | Prometheus | Bound | 10 Gi | TSDB metrics (7-day retention) |
 | Grafana | Bound | 1 Gi | SQLite database (preferences, UI state) |
 | Loki | Bound | 5 Gi | Log index and chunks (72h retention) |
+| Harbor Registry | Bound | 10 Gi | Container image layers |
+| Harbor PostgreSQL | Bound | 1 Gi | Harbor metadata |
+| Harbor Redis | Bound | 1 Gi | Harbor cache |
+| Harbor Jobservice | Bound | 1 Gi | Async job logs |
 
 StorageClass `local-path` is marked as default with `WaitForFirstConsumer` binding. Data is node-local (SPOF) — acceptable trade-off for a homelab, documented.
 
@@ -274,9 +353,20 @@ homelab/
 │   ├── storage/
 │   │   ├── local-path-storage.yaml  # CSI driver manifest
 │   │   └── test-pvc.yaml
-│   └── harbor/
-│       ├── harbor-values.yaml       # Helm values (resources, PVCs, TLS, MetalLB)
-│       └── tls/                     # Self-signed CA + Harbor certificate
+│   ├── harbor/
+│   │   ├── harbor-values.yaml       # Helm values (resources, PVCs, TLS, MetalLB)
+│   │   └── tls/                     # Self-signed CA + Harbor certificate
+│   ├── cert-manager/
+│   │   ├── clusterissuer.yaml       # Private CA issuer (homelab-ca-issuer)
+│   │   ├── clusterissuer-letsencrypt.yaml  # Let's Encrypt DNS-01 via Cloudflare
+│   │   └── certificates.yaml       # TLS certificates for *.homelab.local services
+│   └── gateway/
+│       ├── gateway.yaml             # Cilium Gateway (HTTP + HTTPS listeners)
+│       ├── httproute-nginx.yaml     # nginx.homelab.local → nginx-test
+│       ├── httproute-grafana.yaml   # grafana.homelab.local → monitoring/grafana
+│       ├── httproute-hubble.yaml    # hubble.homelab.local → kube-system/hubble-ui
+│       ├── httproute-podinfo.yaml   # podinfo.homelab.local → podinfo/podinfo-svc
+│       └── httproute-redirect.yaml  # HTTP → HTTPS 301 redirect for all hostnames
 │
 ├── cosign.pub                       # Cosign public key for image verification
 │
@@ -299,19 +389,22 @@ homelab/
         │   ├── require-resource-limits.yaml
         │   ├── require-drop-all-capabilities.yaml
         │   ├── require-labels.yaml
-        │   └── verify-image-signature.yaml  # Enforce mode — key-based Cosign verification
-        └── podinfo/
-            ├── namespace.yaml
-            ├── serviceaccount-podinfo.yaml
-            ├── serviceaccount-redis.yaml
-            ├── deployment-podinfo.yaml
-            ├── deployment-redis.yaml
-            ├── service-podinfo.yaml
-            ├── service-redis.yaml
-            ├── networkpolicy-podinfo.yaml
-            ├── networkpolicy-redis.yaml
-            ├── sealedsecret-redis-url.yaml
-            └── servicemonitor.yaml
+        │   ├── verify-image-signature.yaml       # Enforce — key-based Cosign verification
+        │   └── mutate-gateway-endpointslice.yaml # Auto-fix Cilium/MetalLB label bug
+        ├── podinfo/
+        │   ├── namespace.yaml
+        │   ├── serviceaccount-podinfo.yaml
+        │   ├── serviceaccount-redis.yaml
+        │   ├── deployment-podinfo.yaml
+        │   ├── deployment-redis.yaml
+        │   ├── service-podinfo.yaml
+        │   ├── service-redis.yaml
+        │   ├── networkpolicy-podinfo.yaml
+        │   ├── networkpolicy-redis.yaml
+        │   ├── sealedsecret-redis-url.yaml
+        │   └── servicemonitor.yaml
+        └── rexpn/
+            └── httproute-rexpn.yaml  # rexpn.ahaouari.com (Let's Encrypt TLS)
 ```
 
 ---
@@ -327,7 +420,7 @@ homelab/
 - [x] **Phase 5a** — GitOps: ArgoCD (App of Apps, self-heal), Sealed Secrets
 - [x] **Phase 5b** — Shift-left security: Trivy (CVE + misconfig), Checkov (CIS benchmarks)
 - [x] **Phase 5c** — Supply chain: Cosign keyless signing (Sigstore/Fulcio/Rekor), SBOM (SPDX 2.3)
-- [x] **Phase 6a** — Policy enforcement: Kyverno (6 ClusterPolicies, all Enforce including image signature)
+- [x] **Phase 6a** — Policy enforcement: Kyverno (7 ClusterPolicies — 6 validate + 1 mutate, all Enforce)
 - [x] **Phase 6b** — Secrets management: HashiCorp Vault (KV v2, Kubernetes auth, sidecar injection)
 - [x] **Phase 6c** — Runtime security: Falco (modern eBPF, MITRE ATT&CK mapped, Falcosidekick)
 - [x] **Phase 7a** — Observability: Prometheus + Grafana (20+ dashboards), Loki + Promtail
@@ -337,6 +430,9 @@ homelab/
 - [x] **Phase J2-3** — Microservices: Podinfo + Redis with dual secret delivery (Vault + SealedSecrets), NetworkPolicies, ServiceMonitor
 - [x] **Phase J2-4** — Persistent storage: local-path-provisioner CSI driver, PVCs for Prometheus (10Gi), Grafana (1Gi), Loki (5Gi)
 - [x] **Phase J2-5** — Harbor private registry: Cosign key-based signing, Kyverno image verification upgraded from Audit to Enforce, self-signed PKI
+- [x] **Axe 3** — Ingress: Cilium Gateway API (L7 routing, TLS termination), cert-manager (private CA + Let's Encrypt), HTTP→HTTPS redirect
+- [x] **Axe 4** — Remote access: WireGuard VPN via OPNsense, Cloudflare DDNS (`vpn.ahaouari.com`), split tunnel
+- [x] **Axe 5** — Public TLS: Let's Encrypt certificates via DNS-01 / Cloudflare, split-horizon DNS for internal resolution
 
 ---
 
@@ -361,21 +457,35 @@ talosctl gen config homelab-k8s https://10.10.20.10:6443 \
 talosctl apply-config --insecure -n <NODE_IP> --file <config>.yaml
 talosctl bootstrap --endpoints 10.10.20.10 --nodes 10.10.20.10
 
-# 3. Install networking
-helm install cilium cilium/cilium --namespace kube-system [...]
+# 3. Install Gateway API CRDs (required before Cilium)
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.1/config/crd/experimental/gateway.networking.k8s.io_grpcroutes.yaml
+
+# 4. Install networking (with Gateway API enabled)
+helm install cilium cilium/cilium --namespace kube-system \
+  --set ipam.mode=kubernetes \
+  --set kubeProxyReplacement=true \
+  --set cgroup.autoMount.enabled=false \
+  --set cgroup.hostRoot=/sys/fs/cgroup \
+  --set k8sServiceHost=localhost \
+  --set k8sServicePort=7445 \
+  --set hubble.enabled=true \
+  --set hubble.relay.enabled=true \
+  --set hubble.ui.enabled=true \
+  --set gatewayAPI.enabled=true
 helm install metallb metallb/metallb --namespace metallb-system --create-namespace \
   --set speaker.frr.enabled=false
 
-# 4. Install persistent storage (before monitoring stack)
+# 5. Install persistent storage (before monitoring stack)
 kubectl apply -f kubernetes/storage/local-path-storage.yaml
 
-# 5. Install GitOps (ArgoCD syncs everything else from Git)
+# 6. Install GitOps (ArgoCD syncs everything else from Git)
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
   --server-side --force-conflicts
 argocd app create root --repo https://github.com/abdelhaouari/homelab.git \
   --path gitops/apps --sync-policy automated --auto-prune --self-heal
 
-# 6. Install security stack
+# 7. Install security stack
 helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace \
   --set "features.registryClient.allowInsecure=true"
 helm install vault hashicorp/vault --namespace vault --create-namespace \
@@ -384,11 +494,17 @@ helm install falco falcosecurity/falco --namespace falco --create-namespace \
   --set driver.kind=modern_ebpf --set falcosidekick.enabled=true \
   --set falcosidekick.webui.enabled=false
 
-# 7. Install Harbor (private container registry)
+# 8. Install cert-manager + Gateway
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+# Create CA secret and Cloudflare API token secret in cert-manager namespace
+# Apply ClusterIssuers, Certificates, Gateway, and HTTPRoutes
+
+# 9. Install Harbor (private container registry)
 helm install harbor harbor/harbor --namespace harbor \
   --values kubernetes/harbor/harbor-values.yaml --version 1.16.2
 
-# 8. Install observability
+# 10. Install observability
 helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace monitoring --values kubernetes/monitoring/kube-prometheus-stack-values.yaml
 helm install loki-stack grafana/loki-stack \
@@ -420,15 +536,17 @@ Developer commits to main
       → Manifests are applied to the cluster
         → Kyverno validates at admission (blocks non-compliant or unsigned images)
           → Vault Agent injects secrets into pods
-            → Falco monitors runtime behavior
-              → Prometheus scrapes metrics, Promtail collects logs
-                → Grafana displays dashboards and alerts
+            → Cilium Gateway routes traffic via HTTPRoutes (TLS terminated)
+              → Falco monitors runtime behavior
+                → Prometheus scrapes metrics, Promtail collects logs
+                  → Grafana displays dashboards and alerts
 ```
 
 To deploy a new application:
 1. Add Kubernetes manifests to `gitops/manifests/<app>/`
 2. Add an ArgoCD Application definition to `gitops/apps/<app>.yaml`
-3. `git commit && git push` — ArgoCD handles the rest
+3. Create an HTTPRoute for the Cilium Gateway (if HTTP access is needed)
+4. `git commit && git push` — ArgoCD handles the rest
 
 Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 
@@ -441,13 +559,15 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Least privilege | Per-tool API tokens, PodSecurity labels per namespace, RBAC scoped to namespace |
 | Immutable infrastructure | Packer golden images, Talos Linux (no SSH, no shell, API-only) |
 | Secrets management | Sealed Secrets for Git, Vault sidecar injection at runtime, `.gitignore` for local secrets |
-| Network segmentation | VLANs (OPNsense), Cilium NetworkPolicies (deny-by-default egress) |
+| Network segmentation | VLANs (OPNsense), Cilium NetworkPolicies (deny-by-default egress), WireGuard split tunnel |
 | Defense in depth | Perimeter FW → VLAN isolation → PodSecurity → Kyverno admission → NetworkPolicy → Falco runtime |
 | Shift-left security | Trivy + Checkov scan manifests and images before deployment |
 | Supply chain security | Cosign key-based signing, Harbor private registry, digest pinning (no mutable tags) |
+| TLS everywhere | cert-manager automates certificates — private CA for internal, Let's Encrypt for public |
 | GitOps | Git is the single source of truth; drift is auto-corrected |
 | Audit trail | Git commit history, Kubernetes audit logs, Falco alerts in Loki/Grafana |
-| Reproducibility | Full destroy and rebuild from code |
+| Reproducibility | Full destroy and rebuild from code in ~30 minutes |
+| Remote access | WireGuard VPN with split tunnel — no services exposed to the internet |
 
 ---
 
@@ -462,13 +582,14 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | Ansible | Configuration management | Deployed |
 | Talos Linux | Immutable Kubernetes OS | Deployed |
 | Cilium + Hubble | eBPF CNI / Network observability | Deployed |
+| Cilium Gateway API | L7 ingress controller (HTTPRoutes) | Deployed |
 | MetalLB | Bare-metal load balancer (L2/ARP, FRR disabled) | Deployed |
 | ArgoCD | GitOps continuous delivery | Deployed |
 | Sealed Secrets | Encrypted secrets in Git | Deployed |
 | Trivy | CVE + IaC scanner | Deployed |
 | Checkov | IaC security scanner (CIS) | Deployed |
 | Cosign (Sigstore) | Image signing + verification | Deployed |
-| Kyverno | Policy enforcement (admission) | Deployed |
+| Kyverno | Policy enforcement (admission + mutation) | Deployed |
 | HashiCorp Vault | Secrets management | Deployed |
 | Falco | Runtime threat detection (modern eBPF) | Deployed |
 | Prometheus + Grafana | Metrics + dashboards | Deployed |
@@ -476,3 +597,7 @@ Manual changes to the cluster are automatically reverted by ArgoCD's self-heal.
 | GitHub Actions | CI/CD security pipeline | Deployed |
 | local-path-provisioner | CSI driver / persistent storage | Deployed |
 | Harbor | Private container registry | Deployed |
+| cert-manager | TLS certificate automation | Deployed |
+| Let's Encrypt | Public TLS certificates (DNS-01) | Deployed |
+| WireGuard | Remote access VPN (OPNsense built-in) | Deployed |
+| Cloudflare DDNS | Dynamic DNS for VPN endpoint | Deployed |
