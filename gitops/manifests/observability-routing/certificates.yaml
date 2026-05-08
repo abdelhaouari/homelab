@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-ahaouari-tls
+  namespace: ingress-system
+spec:
+  secretName: grafana-ahaouari-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - grafana.ahaouari.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hubble-ahaouari-tls
+  namespace: ingress-system
+spec:
+  secretName: hubble-ahaouari-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - hubble.ahaouari.com

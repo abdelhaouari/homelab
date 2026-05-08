@@ -26,14 +26,14 @@ spec:
     - name: https-grafana
       protocol: HTTPS
       port: 443
-      hostname: grafana.homelab.local
+      hostname: grafana.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: grafana-tls
+          - name: grafana-ahaouari-tls
     - name: https-argocd
       protocol: HTTPS
       port: 443
@@ -48,14 +48,14 @@ spec:
     - name: https-hubble
       protocol: HTTPS
       port: 443
-      hostname: hubble.homelab.local
+      hostname: hubble.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: hubble-tls
+          - name: hubble-ahaouari-tls
     - name: https-podinfo
       protocol: HTTPS
       port: 443
