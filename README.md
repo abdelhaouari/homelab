@@ -64,19 +64,18 @@ Also in this repo: Packer (Ubuntu 24.04 golden image) + Ansible (baseline harden
 
 | IP             | Service         | Access method                          |
 |----------------|-----------------|----------------------------------------|
-| 10.10.20.100   | ArgoCD UI       | Direct LoadBalancer (stability)        |
-| 10.10.20.103   | Cilium Gateway  | Single L7 entry point for all HTTPRoutes |
+| 10.10.20.103   | Cilium Gateway  | Single L7 entry point for all HTTPRoutes (TLS terminated by Envoy) |
 | 10.10.20.105   | Harbor          | Direct LoadBalancer (pinned annotation) |
 
-Services behind the Cilium Gateway are accessed by hostname, with TLS terminated by Envoy:
+Services behind the Cilium Gateway are accessed by hostname, with TLS terminated by Envoy (cert-manager). The Gateway centralizes L7 routing so most app Services are ClusterIP and reachable only via the gateway hostnames:
 
 | Hostname                  | Backend          | TLS certificate       |
 |---------------------------|------------------|-----------------------|
-| `nginx.homelab.local`     | nginx-test       | Private CA (cert-manager) |
-| `grafana.homelab.local`   | Grafana          | Private CA (cert-manager) |
-| `hubble.homelab.local`    | Hubble UI        | Private CA (cert-manager) |
-| `podinfo.homelab.local`   | Podinfo          | Private CA (cert-manager) |
-| `rexpn.ahaouari.com`      | REXPN            | Let's Encrypt (public) |
+| `argocd.ahaouari.com`     | argocd/argocd-server (via HTTPRoute) | Let's Encrypt (cert: argocd-ahaouari-tls) |
+| `grafana.ahaouari.com`    | monitoring/kube-prometheus-stack-grafana | Let's Encrypt (cert: grafana-ahaouari-tls) |
+| `hubble.ahaouari.com`     | kube-system/hubble-ui | Let's Encrypt (cert: hubble-ahaouari-tls) |
+| `podinfo.ahaouari.com`    | podinfo/podinfo-svc | Let's Encrypt (cert: podinfo-ahaouari-tls) |
+| `rexpn.ahaouari.com`      | rexpn/rexpn-svc   | Let's Encrypt (cert: rexpn-ahaouari-tls) |
 
 > All `*.homelab.local` hostnames resolve to internal IPs via OPNsense Unbound DNS overrides (split-horizon). These services are not exposed to the internet — accessible only from the local network or via WireGuard VPN. HTTP requests are automatically redirected to HTTPS (301).
 
@@ -166,6 +165,12 @@ Two certificate issuers coexist in the cluster:
 | `letsencrypt-prod` | Let's Encrypt (DNS-01 via Cloudflare) | Public-facing services (`*.ahaouari.com`) |
 
 cert-manager automatically provisions and renews TLS certificates. Let's Encrypt certificates are validated via DNS-01 challenges — cert-manager creates a temporary TXT record in Cloudflare, Let's Encrypt verifies domain ownership, then cert-manager cleans up. No web server is exposed to the internet.
+
+Notes:
+- HTTP -> HTTPS redirect is enforced by a cluster HTTPRoute: `kubernetes/gateway/httproute-redirect.yaml`.
+- ArgoCD is configured to accept HTTP from the Gateway (internal traffic) with `argocd-cmd-params-cm` set to `server.insecure: "true"` (declared in `gitops/manifests/argocd-routing/argocd-params.yaml`), because TLS is terminated at the Gateway.
+- Most application Services have been converted to `ClusterIP` and are reachable only through the Cilium Gateway hostnames; Harbor remains an exception and is intentionally exposed as a pinned MetalLB LoadBalancer.
+- Let's Encrypt (DNS-01 via Cloudflare) is used for `*.ahaouari.com` certificates (ClusterIssuer `letsencrypt-prod`); internal `*.homelab.local` still use the private CA.
 
 **Kyverno mutate policy** — Cilium omits the `kubernetes.io/service-name` label on Gateway EndpointSlices, causing MetalLB to refuse ARP announcements. A Kyverno mutate policy (`mutate-gateway-endpointslice`) auto-injects the missing label, fixing the integration without manual intervention.
 
