@@ -15,14 +15,14 @@ spec:
     - name: https-nginx
       protocol: HTTPS
       port: 443
-      hostname: nginx.homelab.local
+      hostname: nginx.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: nginx-tls
+          - name: nginx-ahaouari-tls
     - name: https-grafana
       protocol: HTTPS
       port: 443
@@ -37,14 +37,14 @@ spec:
     - name: https-argocd
       protocol: HTTPS
       port: 443
-      hostname: argocd.homelab.local
+      hostname: argocd.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: argocd-tls
+          - name: argocd-ahaouari-tls
     - name: https-hubble
       protocol: HTTPS
       port: 443
@@ -59,14 +59,14 @@ spec:
     - name: https-podinfo
       protocol: HTTPS
       port: 443
-      hostname: podinfo.homelab.local
+      hostname: podinfo.ahaouari.com
       allowedRoutes:
         namespaces:
           from: All
       tls:
         mode: Terminate
         certificateRefs:
-          - name: podinfo-tls
+          - name: podinfo-ahaouari-tls
     - name: https-rexpn
       protocol: HTTPS
       port: 443

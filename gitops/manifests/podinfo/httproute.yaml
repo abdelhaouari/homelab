@@ -9,7 +9,7 @@ spec:
       namespace: ingress-system
       sectionName: https-podinfo
   hostnames:
-    - podinfo.homelab.local
+    - podinfo.ahaouari.com
   rules:
     - matches:
         - path:
