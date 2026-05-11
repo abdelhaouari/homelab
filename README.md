@@ -364,7 +364,7 @@ homelab/
 │   ├── cert-manager/
 │   │   ├── clusterissuer.yaml       # Private CA issuer (homelab-ca-issuer)
 │   │   ├── clusterissuer-letsencrypt.yaml  # Let's Encrypt DNS-01 via Cloudflare
-│   │   └── certificates.yaml       # TLS certificates for *.homelab.local services
+│   │   └── (public certificates now live under gitops/manifests/*)
 │   └── gateway/
 │       ├── gateway.yaml             # Cilium Gateway (HTTP + HTTPS listeners)
 │       ├── httproute-nginx.yaml     # nginx.homelab.local → nginx-test
