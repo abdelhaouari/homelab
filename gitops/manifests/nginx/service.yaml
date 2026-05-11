@@ -4,7 +4,7 @@ metadata:
   name: nginx
   namespace: nginx-test
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: nginx
   ports:

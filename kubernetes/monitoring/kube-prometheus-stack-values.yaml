@@ -32,7 +32,7 @@ prometheus:
 grafana:
   # Expose via MetalLB (next free IP in 10.10.20.100-150 range)
   service:
-    type: LoadBalancer
+    type: ClusterIP
   # Default admin credentials (change password after first login)
   adminUser: admin
   adminPassword: "changeme-grafana-2026"
