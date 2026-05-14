@@ -1,0 +1,20 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cka-route
+  namespace: cka
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress-system
+      sectionName: https-cka
+  hostnames:
+    - cka.ahaouari.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: cka-svc
+          port: 80

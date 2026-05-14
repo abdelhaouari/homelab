@@ -78,3 +78,14 @@ spec:
         mode: Terminate
         certificateRefs:
           - name: rexpn-ahaouari-tls
+    - name: https-cka
+      protocol: HTTPS
+      port: 443
+      hostname: cka.ahaouari.com
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: cka-ahaouari-tls

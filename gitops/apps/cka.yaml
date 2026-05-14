@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cka
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: "https://github.com/abdelhaouari/homelab.git"
+    path: gitops/manifests/cka
+    targetRevision: HEAD
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: cka
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
